@@ -1,0 +1,192 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ApplicationPackage
+    SchemaVersion="1.0"
+    AppVersion="1.0.0"
+    Author="Heru"
+    ProductCode="{3F51D048-A934-4C4E-8C97-85D36B5C35E2}"
+    UpgradeCode="{7A4E0B19-4F58-4D4E-9AA6-F98059E7C57E}"
+    Name="qjs (QuickJS &amp; Safe Takeoff DSL Plugin)"
+    Description="Embedded QuickJS ECMAScript 2025, SQLite3, MsgPack, and Safe Takeoff DSL for AutoCAD and GstarCAD">
+
+    <CompanyDetails Name="qjs-script" />
+
+    <!-- AutoCAD 2017 (R21.0) -->
+    <Components Description="AutoCAD 2017">
+        <RuntimeRequirements OS="Win64" Platform="AutoCAD*" SeriesMin="R21.0" SeriesMax="R21.0" />
+        <ComponentEntry
+            AppName="qjs_2017"
+            ModuleName="./Contents/2017/qjs_2017.arx"
+            AppType=".arx"
+            LoadOnAutoCADStartup="True">
+            <Commands GroupName="ARX01_COMMANDS">
+                <Command Global="SS-QUERY" Local="SS-QUERY" />
+                <Command Global="SS-SET" Local="SS-SET" />
+                <Command Global="SS-GET" Local="SS-GET" />
+                <Command Global="E-SET" Local="E-SET" />
+                <Command Global="E-GET" Local="E-GET" />
+                <Command Global="E-SHOW" Local="E-SHOW" />
+                <Command Global="JS-REPL" Local="JS-REPL" />
+            </Commands>
+        </ComponentEntry>
+    </Components>
+
+    <!-- AutoCAD 2018 (R22.0) -->
+    <Components Description="AutoCAD 2018">
+        <RuntimeRequirements OS="Win64" Platform="AutoCAD*" SeriesMin="R22.0" SeriesMax="R22.0" />
+        <ComponentEntry
+            AppName="qjs_2018"
+            ModuleName="./Contents/2018/qjs_2018.arx"
+            AppType=".arx"
+            LoadOnAutoCADStartup="True">
+            <Commands GroupName="ARX01_COMMANDS">
+                <Command Global="SS-QUERY" Local="SS-QUERY" />
+                <Command Global="SS-SET" Local="SS-SET" />
+                <Command Global="SS-GET" Local="SS-GET" />
+                <Command Global="E-SET" Local="E-SET" />
+                <Command Global="E-GET" Local="E-GET" />
+                <Command Global="E-SHOW" Local="E-SHOW" />
+                <Command Global="JS-REPL" Local="JS-REPL" />
+            </Commands>
+        </ComponentEntry>
+    </Components>
+
+    <!-- AutoCAD 2019 (R23.0) -->
+    <Components Description="AutoCAD 2019">
+        <RuntimeRequirements OS="Win64" Platform="AutoCAD*" SeriesMin="R23.0" SeriesMax="R23.0" />
+        <ComponentEntry
+            AppName="qjs_2019"
+            ModuleName="./Contents/2019/qjs_2019.arx"
+            AppType=".arx"
+            LoadOnAutoCADStartup="True">
+            <Commands GroupName="ARX01_COMMANDS">
+                <Command Global="SS-QUERY" Local="SS-QUERY" />
+                <Command Global="SS-SET" Local="SS-SET" />
+                <Command Global="SS-GET" Local="SS-GET" />
+                <Command Global="E-SET" Local="E-SET" />
+                <Command Global="E-GET" Local="E-GET" />
+                <Command Global="E-SHOW" Local="E-SHOW" />
+                <Command Global="JS-REPL" Local="JS-REPL" />
+            </Commands>
+        </ComponentEntry>
+    </Components>
+
+    <!-- AutoCAD 2020 (R23.1) -->
+    <Components Description="AutoCAD 2020">
+        <RuntimeRequirements OS="Win64" Platform="AutoCAD*" SeriesMin="R23.1" SeriesMax="R23.1" />
+        <ComponentEntry
+            AppName="qjs_2020"
+            ModuleName="./Contents/2020/qjs_2020.arx"
+            AppType=".arx"
+            LoadOnAutoCADStartup="True">
+            <Commands GroupName="ARX01_COMMANDS">
+                <Command Global="SS-QUERY" Local="SS-QUERY" />
+                <Command Global="SS-SET" Local="SS-SET" />
+                <Command Global="SS-GET" Local="SS-GET" />
+                <Command Global="E-SET" Local="E-SET" />
+                <Command Global="E-GET" Local="E-GET" />
+                <Command Global="E-SHOW" Local="E-SHOW" />
+                <Command Global="JS-REPL" Local="JS-REPL" />
+            </Commands>
+        </ComponentEntry>
+    </Components>
+
+    <!-- AutoCAD 2021 (R24.0) -->
+    <Components Description="AutoCAD 2021">
+        <RuntimeRequirements OS="Win64" Platform="AutoCAD*" SeriesMin="R24.0" SeriesMax="R24.0" />
+        <ComponentEntry
+            AppName="qjs_2021"
+            ModuleName="./Contents/2021/qjs_2021.arx"
+            AppType=".arx"
+            LoadOnAutoCADStartup="True">
+            <Commands GroupName="ARX01_COMMANDS">
+                <Command Global="SS-QUERY" Local="SS-QUERY" />
+                <Command Global="SS-SET" Local="SS-SET" />
+                <Command Global="SS-GET" Local="SS-GET" />
+                <Command Global="E-SET" Local="E-SET" />
+                <Command Global="E-GET" Local="E-GET" />
+                <Command Global="E-SHOW" Local="E-SHOW" />
+                <Command Global="JS-REPL" Local="JS-REPL" />
+            </Commands>
+        </ComponentEntry>
+    </Components>
+
+    <!-- AutoCAD 2022 (R24.1) -->
+    <Components Description="AutoCAD 2022">
+        <RuntimeRequirements OS="Win64" Platform="AutoCAD*" SeriesMin="R24.1" SeriesMax="R24.1" />
+        <ComponentEntry
+            AppName="qjs_2022"
+            ModuleName="./Contents/2022/qjs_2022.arx"
+            AppType=".arx"
+            LoadOnAutoCADStartup="True">
+            <Commands GroupName="ARX01_COMMANDS">
+                <Command Global="SS-QUERY" Local="SS-QUERY" />
+                <Command Global="SS-SET" Local="SS-SET" />
+                <Command Global="SS-GET" Local="SS-GET" />
+                <Command Global="E-SET" Local="E-SET" />
+                <Command Global="E-GET" Local="E-GET" />
+                <Command Global="E-SHOW" Local="E-SHOW" />
+                <Command Global="JS-REPL" Local="JS-REPL" />
+            </Commands>
+        </ComponentEntry>
+    </Components>
+
+    <!-- AutoCAD 2023 (R24.2) -->
+    <Components Description="AutoCAD 2023">
+        <RuntimeRequirements OS="Win64" Platform="AutoCAD*" SeriesMin="R24.2" SeriesMax="R24.2" />
+        <ComponentEntry
+            AppName="qjs_2023"
+            ModuleName="./Contents/2023/qjs_2023.arx"
+            AppType=".arx"
+            LoadOnAutoCADStartup="True">
+            <Commands GroupName="ARX01_COMMANDS">
+                <Command Global="SS-QUERY" Local="SS-QUERY" />
+                <Command Global="SS-SET" Local="SS-SET" />
+                <Command Global="SS-GET" Local="SS-GET" />
+                <Command Global="E-SET" Local="E-SET" />
+                <Command Global="E-GET" Local="E-GET" />
+                <Command Global="E-SHOW" Local="E-SHOW" />
+                <Command Global="JS-REPL" Local="JS-REPL" />
+            </Commands>
+        </ComponentEntry>
+    </Components>
+
+    <!-- AutoCAD 2024 (R24.3) -->
+    <Components Description="AutoCAD 2024">
+        <RuntimeRequirements OS="Win64" Platform="AutoCAD*" SeriesMin="R24.3" SeriesMax="R24.3" />
+        <ComponentEntry
+            AppName="qjs_2024"
+            ModuleName="./Contents/2024/qjs_2024.arx"
+            AppType=".arx"
+            LoadOnAutoCADStartup="True">
+            <Commands GroupName="ARX01_COMMANDS">
+                <Command Global="SS-QUERY" Local="SS-QUERY" />
+                <Command Global="SS-SET" Local="SS-SET" />
+                <Command Global="SS-GET" Local="SS-GET" />
+                <Command Global="E-SET" Local="E-SET" />
+                <Command Global="E-GET" Local="E-GET" />
+                <Command Global="E-SHOW" Local="E-SHOW" />
+                <Command Global="JS-REPL" Local="JS-REPL" />
+            </Commands>
+        </ComponentEntry>
+    </Components>
+
+    <!-- GstarCAD 2026 -->
+    <Components Description="GstarCAD 2026">
+        <RuntimeRequirements OS="Win64" Platform="Gcad*" SeriesMin="R26.0" SeriesMax="R26.0" />
+        <ComponentEntry
+            AppName="qjs_2026"
+            ModuleName="./Contents/gstarcad_2026/qjs_2026.grx"
+            AppType=".grx"
+            LoadOnAutoCADStartup="True">
+            <Commands GroupName="ARX01_COMMANDS">
+                <Command Global="SS-QUERY" Local="SS-QUERY" />
+                <Command Global="SS-SET" Local="SS-SET" />
+                <Command Global="SS-GET" Local="SS-GET" />
+                <Command Global="E-SET" Local="E-SET" />
+                <Command Global="E-GET" Local="E-GET" />
+                <Command Global="E-SHOW" Local="E-SHOW" />
+                <Command Global="JS-REPL" Local="JS-REPL" />
+            </Commands>
+        </ComponentEntry>
+    </Components>
+</ApplicationPackage>

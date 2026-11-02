@@ -1,0 +1,25 @@
+CompileFlags:
+  Add:
+    - -std=c++17
+    - -DUNICODE
+    - -D_UNICODE
+    - -D_ACRXAPP
+    - -DWIN32_LEAN_AND_MEAN
+    - -DNOMINMAX
+    - -Wno-unused-value
+    - -Wno-macro-redefined
+    - -Wno-ignored-attributes
+    - -Wno-inconsistent-missing-override
+    - -Wno-nonportable-include-path
+    - -IC:/Autodesk/Autodesk_ObjectARX_2018_Win_64_and_32_Bit/inc
+    - -IC:/Autodesk/ObjectARX_for_AutoCAD_2021_Win_64bit_dlm/inc
+    - -IC:/Autodesk/ObjectARX_for_AutoCAD_2021_Win_64bit_dlm/inc-x64
+    - -IC:/GstarCAD/grxsdk/arx/inc
+    - -IC:/GstarCAD/grxsdk/inc
+    - -Icommand
+    - -Isrc
+    - -Isrc/query_dsl
+    - -Ithird_party/quickjs
+    - -Ithird_party/msgpack_serde
+    - -Ithird_party/sqlite/sqlite-amalgamation-3530200
+    - -IC:/Users/Heruh/.nuget/packages/microsoft.web.webview2/1.0.3650.58/build/native/include
