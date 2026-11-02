@@ -362,6 +362,198 @@ Query: e.data.h > 1 && e.data.h < 10
 
 ---
 
+## Comprehensive `SS-GET` Query Guide & Real-World Examples
+
+`SS-GET` (CLI command), `(ss-get ...)` (AutoLISP), and `editor.ssGet(...)` (JavaScript) provide high-performance selection filtering, property inspection, and visual highlight management.
+
+When executed:
+1. **Interactive Selection & Implied Support**: Automatically uses existing implied pickfirst selections (`acedSSGet("I")`), prompts for new interactive selections, or filters pre-existing selection sets programmatically.
+2. **Persistent Visual Grips**: Matched entities remain **visually selected and highlighted with grips** on screen (`acedSSSetFirst`).
+3. **Structured JSON Output**: Returns full JSON representations of matched entities including handle, type, color, layer, coordinates, area/length, and custom metadata.
+
+---
+
+### Example 1: Exclusions, Wildcard Globs & Typo Auto-Recovery
+Filter for drawing elements while excluding specific ACI or RGB colors and matching code patterns:
+
+```text
+Command: SS-GET
+Query: {clr: except [1, {r: any, g:0, b:0}], data: {code: any, fl: 'Lt.*', code: in ['CT*,'*MR*'], ty: 'AcDbLine'}}
+Select objects: 12 found
+Select objects: <Enter>
+```
+
+**JSON Output:**
+```json
+[
+  {
+    "id": 105,
+    "hand": "3A1F",
+    "ty": "AcDbLine",
+    "lyr": "WALL",
+    "clr": 2,
+    "l": 3500.0,
+    "data": {
+      "code": "CT1",
+      "fl": "Lt.1",
+      "h": 3.0
+    }
+  },
+  {
+    "id": 108,
+    "hand": "3A22",
+    "ty": "AcDbLine",
+    "lyr": "WALL",
+    "clr": { "r": 0, "g": 128, "b": 255 },
+    "l": 1200.0,
+    "data": {
+      "code": "XMR2",
+      "fl": "Lt.2",
+      "h": 2.8
+    }
+  }
+]
+```
+
+**How It Works:**
+- **`clr: except [1, {r: any, g:0, b:0}]`**: Excludes entities with ACI color index `1` (red) as well as any TrueColor red where `g=0` and `b=0`.
+- **`code: in ['CT*,'*MR*']`**: Typo recovery automatically fixes the comma placement into `['CT*', '*MR*']` and performs native case-insensitive AutoCAD wildcard matching (`acutWcMatch`).
+- **`fl: 'Lt.*'`**: Wildcard matching for floor strings like `Lt.1` and `Lt.2`.
+- **`ty: 'AcDbLine'` inside `data:`**: Automatically falls back to match the root entity's type.
+
+---
+
+### Example 2: Deep Nested Objects, Unkeyed Conditions & Regex Phone Matching
+Query entities with deep hierarchical data (e.g., custom attributes with dimensions and contact info):
+
+**Entity Structure:**
+```json
+{
+  "hand": "4F2A",
+  "ty": "AcDbPolyline",
+  "clr": 3,
+  "phone": "021-4567",
+  "data": {
+    "h": 10,
+    "section": { "b": 500, "w": 200 }
+  }
+}
+```
+
+**Query:**
+```text
+Command: SS-GET
+Query: {clr: any, e: {phone: /\d{3}-\d{4}/g, data: {.h > 1 && .h < 25, section: {.b > 200 && .w < 300}}}}
+Select objects: 3 found
+Select objects: <Enter>
+```
+
+**How It Works:**
+- **`clr: any`**: Matches any entity with a valid color defined (i.e. `val !== undefined && val !== null`).
+- **`e:` alias**: Targets the root entity itself, allowing entity-level properties like `phone` and nested sub-objects like `data` to be grouped together.
+- **`phone: /\d{3}-\d{4}/g`**: Matches standard telephone number format. The `/g` flag's internal `lastIndex` pointer is automatically reset before each entity evaluation to prevent state drift across the selection set.
+- **`.h > 1 && .h < 25`**: Unkeyed condition expression evaluated directly within the scope of `data`. Leading dots automatically resolve to `_e.h`.
+- **`section: {.b > 200 && .w < 300}`**: Unkeyed condition scoped to `data.section`.
+
+---
+
+### Example 3: Resilient Direct Boolean Expressions
+Evaluate arbitrary JavaScript expressions safely across diverse drawing entities:
+
+```text
+Command: SS-GET
+Query: e.data.h > 1 && e.data.h < 10
+```
+or filtering by calculated geometry:
+```text
+Command: SS-GET
+Query: e.a > 5e5 && e.lyr.startsWith('ROOM')
+```
+
+**Why It's Safe:**
+- Entities missing `data` or with `data.h === undefined` are caught by an internal `try...catch` guard and safely return `false`. The command never crashes or aborts early when encountering non-matching or incomplete entities.
+
+---
+
+### Example 4: Continuous Interactive Tag Inspection with Templates (`_0`, `_1`)
+Inspect varying codes across different areas of a project in an uninterrupted loop:
+
+```text
+Command: SS-GET
+Query: {data: {code: _0, .h > _1}}
+_0 <'CT1'>: <Enter>
+_1 <1.5>: <Enter>
+Select objects: 2 found
+Select objects: <Enter>
+[ { "id": 12, "hand": "2B1", "ty": "AcDbLine", "data": { "code": "CT1", "h": 2.0 } } ]
+
+_0 <CT1>: CT2
+_1 <1.5>: 0.5
+Select objects: 4 found
+Select objects: <Enter>
+[ ... ]
+
+_0 <CT2>: <Esc>        <-- Press Esc to exit loop
+Command:
+```
+
+---
+
+### Example 5: AutoLISP Integration (`ss-get`)
+
+AutoLISP routines can leverage the full pattern DSL to filter user selections or existing selection sets:
+
+#### 1. Interactive Selection with Pattern Filter:
+```lisp
+;; Prompts user to select objects, filters by pattern, highlights matches, returns JSON string:
+(setq json (ss-get "{clr: except [1, {r: any, g: 0, b: 0}], data: {.h > 1}}"))
+```
+
+#### 2. Filtering an Existing Selection Set Programmatically:
+```lisp
+;; Select objects using standard AutoLISP (or previous selection):
+(setq ss (ssget))
+
+;; Filter existing selection set 'ss' by query DSL without prompting:
+(setq json (ss-get ss "{data: {code: in ['WALL*', 'PART*'], .h > 2.4}}"))
+
+;; Matching entities remain highlighted on screen with grips
+```
+
+#### 3. Reading Matched Handles in AutoLISP:
+```lisp
+;; Evaluate expression to get an array of handles:
+(setq handles-json (js-eval "editor.ssGet({ data: { code: 'CT1' } }).map(e => e.hand)"))
+;; => '["3A1F", "3A20"]'
+```
+
+---
+
+### Example 6: JavaScript API (`editor.ssGet`)
+Use inside JS scripts, palettes, or the `js:repl` interactive console:
+
+```javascript
+// 1. Query with declarative pattern:
+const walls = editor.ssGet({
+  clr: { not: [1, { r: any, g: 0, b: 0 }] },
+  data: { code: ['CT*', '*MR*'], ty: 'AcDbLine' }
+});
+
+// 2. Query specific handles with filter:
+const filtered = editor.ssGet({
+  handles: ['3A1F', '3A20', '3A21'],
+  filter: e => e.data && e.data.h > 2.5
+});
+
+// 3. Project specific fields:
+const summary = editor.ssGet({
+  filter: e => e.lyr === 'ROOM',
+  get: e => ({ handle: e.hand, area_m2: e.a / 1e6, floor: e.data?.fl })
+});
+```
+
+---
+
 ## Universal Color Spaces (`clr` / `color`)
 
 The `clr` (or `color`) property across `SS-SET`, `E-SET`, `entity.set()`, and `layer.set()` natively supports multiple color representations and color spaces without needing external conversion calls:
