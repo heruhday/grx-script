@@ -828,7 +828,7 @@ Runtime::Runtime()
             "globalThis.entity = require('entity');"
             "globalThis.process = require('process');"
             "globalThis.net = require('net');"
-            "globalThis.any = function(val) { return val !== undefined && val !== null && val !== ''; };"
+            "globalThis.any = function(val) { return val !== undefined && val !== null; };"
             "globalThis.rgb = function(r, g, b) { return { r: r, g: g, b: b }; };"
             "globalThis.TextEncoder = class TextEncoder {"
             "  encode(str) {"

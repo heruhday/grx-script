@@ -250,8 +250,19 @@ namespace safe_commands
             JSValue testProp = JS_GetPropertyStr(context, expected, "test");
             if (JS_IsFunction(context, testProp))
             {
-                JSValueConst argv[1] = { actual };
+                JS_SetPropertyStr(context, expected, "lastIndex", JS_NewInt32(context, 0));
+                JSValue actStr = JS_UNDEFINED;
+                if (!JS_IsString(actual))
+                {
+                    actStr = JS_ToString(context, actual);
+                }
+                else
+                {
+                    actStr = JS_DupValue(context, actual);
+                }
+                JSValueConst argv[1] = { actStr };
                 JSValue res = JS_Call(context, testProp, expected, 1, argv);
+                JS_FreeValue(context, actStr);
                 JS_FreeValue(context, testProp);
                 if (JS_IsException(res))
                 {
@@ -353,7 +364,12 @@ namespace safe_commands
                 const char *sExp = JS_ToCString(context, expected);
                 if (sExp)
                 {
-                    if (_stricmp(sExp, "any") == 0 || std::strcmp(sExp, "*") == 0)
+                    if (_stricmp(sExp, "any") == 0)
+                    {
+                        JS_FreeCString(context, sExp);
+                        return !JS_IsUndefined(actual) && !JS_IsNull(actual);
+                    }
+                    if (std::strcmp(sExp, "*") == 0)
                     {
                         JS_FreeCString(context, sExp);
                         if (JS_IsUndefined(actual) || JS_IsNull(actual)) return false;
@@ -489,6 +505,36 @@ namespace safe_commands
                 std::string propName(prop);
                 JS_FreeCString(context, prop);
 
+                if (propName == "where" || propName == "filter")
+                {
+                    JSValue whereFn = JS_GetProperty(context, pattern, tab[i].atom);
+                    if (JS_IsFunction(context, whereFn))
+                    {
+                        JSValueConst argv[1] = { target };
+                        JSValue res = JS_Call(context, whereFn, JS_UNDEFINED, 1, argv);
+                        bool pass = true;
+                        if (JS_IsException(res))
+                        {
+                            JSValue exc = JS_GetException(context);
+                            JS_FreeValue(context, exc);
+                            pass = false;
+                        }
+                        else
+                        {
+                            pass = JS_ToBool(context, res) != 0;
+                            JS_FreeValue(context, res);
+                        }
+                        JS_FreeValue(context, whereFn);
+                        if (!pass)
+                        {
+                            allMatched = false;
+                            break;
+                        }
+                        continue;
+                    }
+                    JS_FreeValue(context, whereFn);
+                }
+
                 if (isTopLevelOptions && isReservedOptionKey(propName))
                 {
                     continue;
@@ -509,6 +555,7 @@ namespace safe_commands
                     else if (propName == "handle") actual = JS_GetPropertyStr(context, target, "hand");
                     else if (propName == "trp") actual = JS_GetPropertyStr(context, target, "transparency");
                     else if (propName == "transparency") actual = JS_GetPropertyStr(context, target, "trp");
+                    else if (propName == "e") actual = JS_DupValue(context, target);
                 }
 
                 if (JS_IsUndefined(actual))
@@ -1270,6 +1317,226 @@ namespace safe_commands
             return false;
         }
 
+        std::string transformUnkeyedConditions(const std::string &s)
+        {
+            std::string out;
+            size_t i = 0;
+            while (i < s.size())
+            {
+                if (s[i] == '{')
+                {
+                    size_t depth = 0;
+                    size_t j = i;
+                    char inStr = 0;
+                    bool inRegex = false;
+                    while (j < s.size())
+                    {
+                        char c = s[j];
+                        if (inStr)
+                        {
+                            if (c == '\\' && j + 1 < s.size()) j++;
+                            else if (c == inStr) inStr = 0;
+                        }
+                        else if (inRegex)
+                        {
+                            if (c == '\\' && j + 1 < s.size()) j++;
+                            else if (c == '/') inRegex = false;
+                        }
+                        else if (c == '\'' || c == '"' || c == '`')
+                        {
+                            inStr = c;
+                        }
+                        else if (c == '/')
+                        {
+                            if (j + 1 < s.size() && s[j + 1] == '/')
+                            {
+                                size_t endLine = s.find('\n', j + 2);
+                                if (endLine == std::string::npos) endLine = s.size();
+                                j = endLine;
+                                continue;
+                            }
+                            else if (j + 1 < s.size() && s[j + 1] == '*')
+                            {
+                                size_t endComment = s.find("*/", j + 2);
+                                if (endComment == std::string::npos) endComment = s.size();
+                                else endComment += 1;
+                                j = endComment;
+                                continue;
+                            }
+                            else
+                            {
+                                size_t k = j;
+                                while (k > 0 && (s[k - 1] == ' ' || s[k - 1] == '\t' || s[k - 1] == '\r' || s[k - 1] == '\n')) k--;
+                                if (k > 0 && std::strchr(":,([{=!&|?", s[k - 1]) != nullptr)
+                                {
+                                    inRegex = true;
+                                }
+                            }
+                        }
+                        else if (c == '{')
+                        {
+                            depth++;
+                        }
+                        else if (c == '}')
+                        {
+                            depth--;
+                            if (depth == 0) break;
+                        }
+                        j++;
+                    }
+
+                    if (depth == 0)
+                    {
+                        std::string inner = s.substr(i + 1, j - (i + 1));
+                        std::vector<std::string> segments;
+                        size_t segStart = 0;
+                        size_t segDepth = 0;
+                        char inS = 0;
+                        bool inR = false;
+                        for (size_t k = 0; k < inner.size(); ++k)
+                        {
+                            char c = inner[k];
+                            if (inS)
+                            {
+                                if (c == '\\' && k + 1 < inner.size()) k++;
+                                else if (c == inS) inS = 0;
+                            }
+                            else if (inR)
+                            {
+                                if (c == '\\' && k + 1 < inner.size()) k++;
+                                else if (c == '/') inR = false;
+                            }
+                            else if (c == '\'' || c == '"' || c == '`')
+                            {
+                                inS = c;
+                            }
+                            else if (c == '/')
+                            {
+                                size_t prev = k;
+                                while (prev > 0 && (inner[prev - 1] == ' ' || inner[prev - 1] == '\t' || inner[prev - 1] == '\r' || inner[prev - 1] == '\n')) prev--;
+                                if (prev > 0 && std::strchr(":,([{=!&|?", inner[prev - 1]) != nullptr)
+                                {
+                                    inR = true;
+                                }
+                            }
+                            else if (c == '{' || c == '(' || c == '[')
+                            {
+                                segDepth++;
+                            }
+                            else if (c == '}' || c == ')' || c == ']')
+                            {
+                                segDepth--;
+                            }
+                            else if (c == ',' && segDepth == 0)
+                            {
+                                segments.push_back(inner.substr(segStart, k - segStart));
+                                segStart = k + 1;
+                            }
+                        }
+                        segments.push_back(inner.substr(segStart));
+
+                        std::vector<std::string> transformedSegs;
+                        std::vector<std::string> whereExprs;
+                        for (const auto &seg : segments)
+                        {
+                            size_t f = seg.find_first_not_of(" \t\r\n");
+                            if (f == std::string::npos) continue;
+                            size_t l = seg.find_last_not_of(" \t\r\n");
+                            std::string trimmed = seg.substr(f, l - f + 1);
+
+                            bool hasColon = false;
+                            size_t d = 0;
+                            char inS2 = 0;
+                            bool inR2 = false;
+                            for (size_t idx = 0; idx < seg.size(); ++idx)
+                            {
+                                char ch = seg[idx];
+                                if (inS2)
+                                {
+                                    if (ch == '\\' && idx + 1 < seg.size()) idx++;
+                                    else if (ch == inS2) inS2 = 0;
+                                }
+                                else if (inR2)
+                                {
+                                    if (ch == '\\' && idx + 1 < seg.size()) idx++;
+                                    else if (ch == '/') inR2 = false;
+                                }
+                                else if (ch == '\'' || ch == '"' || ch == '`')
+                                {
+                                    inS2 = ch;
+                                }
+                                else if (ch == '/')
+                                {
+                                    size_t prev = idx;
+                                    while (prev > 0 && (seg[prev - 1] == ' ' || seg[prev - 1] == '\t')) prev--;
+                                    if (prev > 0 && std::strchr(":,([{=!&|?", seg[prev - 1]) != nullptr)
+                                    {
+                                        inR2 = true;
+                                    }
+                                }
+                                else if (ch == '{' || ch == '(' || ch == '[')
+                                {
+                                    d++;
+                                }
+                                else if (ch == '}' || ch == ')' || ch == ']')
+                                {
+                                    d--;
+                                }
+                                else if (ch == ':' && d == 0)
+                                {
+                                    hasColon = true;
+                                    break;
+                                }
+                            }
+
+                            if (!hasColon && (trimmed[0] == '.' ||
+                                trimmed.find('>') != std::string::npos || trimmed.find('<') != std::string::npos ||
+                                trimmed.find("==") != std::string::npos || trimmed.find("!=") != std::string::npos ||
+                                trimmed.find("&&") != std::string::npos || trimmed.find("||") != std::string::npos))
+                            {
+                                try {
+                                    std::regex reDot(R"((^|[^a-zA-Z0-9_$.])\.([a-zA-Z0-9_$]+))");
+                                    std::string converted = std::regex_replace(trimmed, reDot, "$1_e.$2");
+                                    whereExprs.push_back(converted);
+                                } catch (...) {
+                                    whereExprs.push_back(trimmed);
+                                }
+                            }
+                            else
+                            {
+                                transformedSegs.push_back(transformUnkeyedConditions(seg));
+                            }
+                        }
+
+                        if (!whereExprs.empty())
+                        {
+                            std::string combined;
+                            for (size_t wi = 0; wi < whereExprs.size(); ++wi)
+                            {
+                                if (wi > 0) combined += " && ";
+                                combined += "(" + whereExprs[wi] + ")";
+                            }
+                            std::string whereProp = "where: (_e) => { try { with (_e) { with ((_e && _e.data) || {}) { return Boolean(" + combined + "); } } } catch { return false; } }";
+                            transformedSegs.insert(transformedSegs.begin(), whereProp);
+                        }
+
+                        out.push_back('{');
+                        for (size_t si = 0; si < transformedSegs.size(); ++si)
+                        {
+                            if (si > 0) out += ", ";
+                            out += transformedSegs[si];
+                        }
+                        out.push_back('}');
+                        i = j + 1;
+                        continue;
+                    }
+                }
+                out.push_back(s[i]);
+                i++;
+            }
+            return out;
+        }
+
         std::string normalizeShowQuery(const std::string &rawQuery)
         {
             std::string q = rawQuery;
@@ -1309,6 +1576,9 @@ namespace safe_commands
 
             if (isObjectPattern)
             {
+                // Transform unkeyed condition expressions like {.h > 1 && .h < 25} to where: (_e) => ...
+                q = transformUnkeyedConditions(q);
+
                 // 1. Fix quote typos like ['CT*,'*MR*'] -> ['CT*', '*MR*']
                 try
                 {
