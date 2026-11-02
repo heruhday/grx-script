@@ -17,6 +17,7 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <sstream>
+#include <regex>
 
 #include "aced.h"
 #include "acedads.h"
@@ -208,7 +209,7 @@ namespace safe_commands
             return foundPattern;
         }
 
-        bool matchesPattern(JSContext *context, JSValueConst pattern, JSValueConst target, bool isTopLevelOptions = false);
+        bool matchesPattern(JSContext *context, JSValueConst pattern, JSValueConst target, bool isTopLevelOptions = false, JSValueConst rootTarget = JS_UNDEFINED);
 
         bool valuesMatch(JSContext *context, JSValueConst expected, JSValueConst actual)
         {
@@ -218,6 +219,8 @@ namespace safe_commands
                 JSValue res = JS_Call(context, expected, JS_UNDEFINED, 1, argv);
                 if (JS_IsException(res))
                 {
+                    JSValue exc = JS_GetException(context);
+                    JS_FreeValue(context, exc);
                     JS_FreeValue(context, res);
                     return false;
                 }
@@ -252,6 +255,8 @@ namespace safe_commands
                 JS_FreeValue(context, testProp);
                 if (JS_IsException(res))
                 {
+                    JSValue exc = JS_GetException(context);
+                    JS_FreeValue(context, exc);
                     JS_FreeValue(context, res);
                     return false;
                 }
@@ -263,48 +268,188 @@ namespace safe_commands
 
             if (JS_IsObject(expected) && !JS_IsNull(expected))
             {
+                JSValue notProp = JS_GetPropertyStr(context, expected, "not");
+                if (!JS_IsUndefined(notProp))
+                {
+                    bool innerMatch = valuesMatch(context, notProp, actual);
+                    JS_FreeValue(context, notProp);
+                    return !innerMatch;
+                }
+
                 if (!JS_IsObject(actual) || JS_IsNull(actual))
                 {
+                    if (JS_IsNumber(actual))
+                    {
+                        int32_t aci = 0;
+                        if (JS_ToInt32(context, &aci, actual) == 0 && aci >= 0 && aci <= 256)
+                        {
+                            JSValue hasR = JS_GetPropertyStr(context, expected, "r");
+                            JSValue hasG = JS_GetPropertyStr(context, expected, "g");
+                            JSValue hasB = JS_GetPropertyStr(context, expected, "b");
+                            bool hasRgb = !JS_IsUndefined(hasR) || !JS_IsUndefined(hasG) || !JS_IsUndefined(hasB);
+                            JS_FreeValue(context, hasR);
+                            JS_FreeValue(context, hasG);
+                            JS_FreeValue(context, hasB);
+                            if (hasRgb)
+                            {
+                                AcCmColor col;
+                                col.setColorIndex(static_cast<Adesk::UInt16>(aci));
+                                JSValue rgbObj = JS_NewObject(context);
+                                JS_SetPropertyStr(context, rgbObj, "r", JS_NewInt32(context, col.red()));
+                                JS_SetPropertyStr(context, rgbObj, "g", JS_NewInt32(context, col.green()));
+                                JS_SetPropertyStr(context, rgbObj, "b", JS_NewInt32(context, col.blue()));
+                                bool matched = matchesPattern(context, expected, rgbObj, false);
+                                JS_FreeValue(context, rgbObj);
+                                return matched;
+                            }
+                        }
+                    }
                     return false;
                 }
                 return matchesPattern(context, expected, actual, false);
             }
 
-            if (JS_IsNumber(expected) && JS_IsNumber(actual))
+            if (JS_IsNumber(expected))
             {
-                double dExp = 0, dAct = 0;
-                JS_ToFloat64(context, &dExp, expected);
-                JS_ToFloat64(context, &dAct, actual);
-                return std::abs(dExp - dAct) < 1e-6;
-            }
-
-            if (JS_IsString(expected) && JS_IsString(actual))
-            {
-                const char *sExp = JS_ToCString(context, expected);
-                const char *sAct = JS_ToCString(context, actual);
-                bool match = false;
-                if (sExp && sAct)
+                if (JS_IsNumber(actual))
                 {
-                    if (std::strcmp(sExp, sAct) == 0)
+                    double dExp = 0, dAct = 0;
+                    JS_ToFloat64(context, &dExp, expected);
+                    JS_ToFloat64(context, &dAct, actual);
+                    return std::abs(dExp - dAct) < 1e-6;
+                }
+                if (JS_IsObject(actual) && !JS_IsNull(actual))
+                {
+                    int32_t expAci = 0;
+                    if (JS_ToInt32(context, &expAci, expected) == 0 && expAci >= 0 && expAci <= 256)
                     {
-                        match = true;
-                    }
-                    else if (_stricmp(sExp, sAct) == 0)
-                    {
-                        match = true;
-                    }
-                    else
-                    {
-                        std::string prefixed = std::string("AcDb") + sExp;
-                        if (_stricmp(prefixed.c_str(), sAct) == 0)
+                        JSValue actR = JS_GetPropertyStr(context, actual, "r");
+                        JSValue actG = JS_GetPropertyStr(context, actual, "g");
+                        JSValue actB = JS_GetPropertyStr(context, actual, "b");
+                        if (JS_IsNumber(actR) && JS_IsNumber(actG) && JS_IsNumber(actB))
                         {
-                            match = true;
+                            int32_t r = 0, g = 0, b = 0;
+                            JS_ToInt32(context, &r, actR);
+                            JS_ToInt32(context, &g, actG);
+                            JS_ToInt32(context, &b, actB);
+                            AcCmColor col;
+                            col.setColorIndex(static_cast<Adesk::UInt16>(expAci));
+                            bool match = (col.red() == r && col.green() == g && col.blue() == b);
+                            JS_FreeValue(context, actR);
+                            JS_FreeValue(context, actG);
+                            JS_FreeValue(context, actB);
+                            return match;
                         }
+                        JS_FreeValue(context, actR);
+                        JS_FreeValue(context, actG);
+                        JS_FreeValue(context, actB);
                     }
                 }
-                if (sExp) JS_FreeCString(context, sExp);
-                if (sAct) JS_FreeCString(context, sAct);
-                return match;
+                return false;
+            }
+
+            if (JS_IsString(expected))
+            {
+                const char *sExp = JS_ToCString(context, expected);
+                if (sExp)
+                {
+                    if (_stricmp(sExp, "any") == 0 || std::strcmp(sExp, "*") == 0)
+                    {
+                        JS_FreeCString(context, sExp);
+                        if (JS_IsUndefined(actual) || JS_IsNull(actual)) return false;
+                        if (JS_IsString(actual))
+                        {
+                            const char *sAct = JS_ToCString(context, actual);
+                            bool ok = (sAct && sAct[0] != '\0');
+                            if (sAct) JS_FreeCString(context, sAct);
+                            return ok;
+                        }
+                        return true;
+                    }
+
+                    if (JS_IsString(actual))
+                    {
+                        const char *sAct = JS_ToCString(context, actual);
+                        bool match = false;
+                        if (sAct)
+                        {
+                            if (std::strcmp(sExp, sAct) == 0 || _stricmp(sExp, sAct) == 0)
+                            {
+                                match = true;
+                            }
+                            else
+                            {
+                                std::string prefixed = std::string("AcDb") + sExp;
+                                if (_stricmp(prefixed.c_str(), sAct) == 0)
+                                {
+                                    match = true;
+                                }
+                            }
+
+                            if (!match && std::strpbrk(sExp, "*?#@.~[]") != nullptr)
+                            {
+                                std::basic_string<ACHAR> actW = command_text::fromUtf8(sAct);
+                                std::basic_string<ACHAR> expW = command_text::fromUtf8(sExp);
+                                for (auto &c : actW) c = static_cast<ACHAR>(towupper(c));
+                                for (auto &c : expW) c = static_cast<ACHAR>(towupper(c));
+                                if (acutWcMatch(actW.c_str(), expW.c_str()) == RTNORM)
+                                {
+                                    match = true;
+                                }
+                            }
+
+                            if (!match && std::strpbrk(sExp, ".*+?^$|()[]{}") != nullptr)
+                            {
+                                try
+                                {
+                                    std::regex re(sExp, std::regex_constants::icase);
+                                    if (std::regex_match(sAct, re))
+                                    {
+                                        match = true;
+                                    }
+                                }
+                                catch (...)
+                                {
+                                }
+                            }
+                            JS_FreeCString(context, sAct);
+                        }
+                        JS_FreeCString(context, sExp);
+                        return match;
+                    }
+                    else if (JS_IsNumber(actual))
+                    {
+                        double dAct = 0;
+                        JS_ToFloat64(context, &dAct, actual);
+                        bool match = false;
+                        if (sExp[0] == '>' || sExp[0] == '<' || sExp[0] == '!')
+                        {
+                            const char *numPart = sExp + 1;
+                            if (*numPart == '=') numPart++;
+                            while (*numPart == ' ') numPart++;
+                            char *endPtr = nullptr;
+                            double threshold = std::strtod(numPart, &endPtr);
+                            if (endPtr != numPart)
+                            {
+                                if (sExp[0] == '>' && sExp[1] == '=') match = (dAct >= threshold);
+                                else if (sExp[0] == '>') match = (dAct > threshold);
+                                else if (sExp[0] == '<' && sExp[1] == '=') match = (dAct <= threshold);
+                                else if (sExp[0] == '<') match = (dAct < threshold);
+                                else if (sExp[0] == '!' && sExp[1] == '=') match = (std::abs(dAct - threshold) > 1e-6);
+                            }
+                        }
+                        else
+                        {
+                            char buf[64];
+                            std::snprintf(buf, sizeof(buf), "%.6g", dAct);
+                            if (std::strcmp(buf, sExp) == 0) match = true;
+                        }
+                        JS_FreeCString(context, sExp);
+                        return match;
+                    }
+                    JS_FreeCString(context, sExp);
+                }
+                return false;
             }
 
             if (JS_IsBool(expected))
@@ -318,7 +463,7 @@ namespace safe_commands
             return false;
         }
 
-        bool matchesPattern(JSContext *context, JSValueConst pattern, JSValueConst target, bool isTopLevelOptions)
+        bool matchesPattern(JSContext *context, JSValueConst pattern, JSValueConst target, bool isTopLevelOptions, JSValueConst rootTarget)
         {
             if (!JS_IsObject(pattern) || JS_IsNull(pattern))
             {
@@ -376,7 +521,44 @@ namespace safe_commands
                     JS_FreeValue(context, dataVal);
                 }
 
-                bool match = valuesMatch(context, expected, actual);
+                // If property not found in current target and rootTarget is provided (e.g. searching inside 'data'),
+                // fallback to checking root entity for standard properties (ty, lyr, clr, hand, etc.)
+                if (JS_IsUndefined(actual) && !JS_IsUndefined(rootTarget) && !JS_IsNull(rootTarget))
+                {
+                    actual = JS_GetProperty(context, rootTarget, tab[i].atom);
+                    if (JS_IsUndefined(actual))
+                    {
+                        if (propName == "clr") actual = JS_GetPropertyStr(context, rootTarget, "color");
+                        else if (propName == "color") actual = JS_GetPropertyStr(context, rootTarget, "clr");
+                        else if (propName == "lyr") actual = JS_GetPropertyStr(context, rootTarget, "layer");
+                        else if (propName == "layer") actual = JS_GetPropertyStr(context, rootTarget, "lyr");
+                        else if (propName == "ty") actual = JS_GetPropertyStr(context, rootTarget, "type");
+                        else if (propName == "type") actual = JS_GetPropertyStr(context, rootTarget, "ty");
+                        else if (propName == "hand") actual = JS_GetPropertyStr(context, rootTarget, "handle");
+                        else if (propName == "handle") actual = JS_GetPropertyStr(context, rootTarget, "hand");
+                    }
+                }
+
+                bool match = false;
+                if (JS_IsObject(expected) && !JS_IsNull(expected) && !JS_IsFunction(context, expected) && !JS_IsArray(expected))
+                {
+                    JSValue notProp = JS_GetPropertyStr(context, expected, "not");
+                    if (!JS_IsUndefined(notProp))
+                    {
+                        JS_FreeValue(context, notProp);
+                        match = valuesMatch(context, expected, actual);
+                    }
+                    else
+                    {
+                        // Pass target as rootTarget when descending into child objects (e.g. data)
+                        match = matchesPattern(context, expected, actual, false, target);
+                    }
+                }
+                else
+                {
+                    match = valuesMatch(context, expected, actual);
+                }
+
                 JS_FreeValue(context, expected);
                 JS_FreeValue(context, actual);
 
@@ -408,6 +590,8 @@ namespace safe_commands
                 JSValue res = JS_Call(context, predicate, JS_UNDEFINED, 1, argv);
                 if (JS_IsException(res))
                 {
+                    JSValue exc = JS_GetException(context);
+                    JS_FreeValue(context, exc);
                     JS_FreeValue(context, res);
                     return false;
                 }
@@ -1110,6 +1294,176 @@ namespace safe_commands
                 }
             }
 
+            // Check if query is an object pattern
+            bool isObjectPattern = false;
+            if (q.front() == '{' && q.back() == '}')
+            {
+                isObjectPattern = true;
+            }
+            else if (q.front() != '(' && q.find(':') != std::string::npos &&
+                     q.find('?') == std::string::npos && q.find(';') == std::string::npos &&
+                     q.find("=>") == std::string::npos)
+            {
+                isObjectPattern = true;
+            }
+
+            if (isObjectPattern)
+            {
+                // 1. Fix quote typos like ['CT*,'*MR*'] -> ['CT*', '*MR*']
+                try
+                {
+                    std::regex reTypo(R"(,'\s*([*?#@.A-Za-z0-9_ -]+'))");
+                    q = std::regex_replace(q, reTypo, "', '$1");
+
+                    std::regex reMissingComma(R"('(\s*)')");
+                    q = std::regex_replace(q, reMissingComma, "', '");
+
+                    std::regex reRgb(R"(\brgb\s*\{)");
+                    q = std::regex_replace(q, reRgb, "{");
+
+                    std::regex reEKey(R"(([\{,]\s*)e\.([a-zA-Z0-9_$]+)\s*:)");
+                    q = std::regex_replace(q, reEKey, "$1$2:");
+
+                    std::regex reEKeyStart(R"(^\s*e\.([a-zA-Z0-9_$]+)\s*:)");
+                    q = std::regex_replace(q, reEKeyStart, "$1:");
+
+                    std::regex reIn(R"(:\s*in\s*\[)");
+                    q = std::regex_replace(q, reIn, ": [");
+                }
+                catch (...)
+                {
+                }
+
+                // 2. Transform except / not in / !in to { not: ... }
+                std::string transformed;
+                size_t i = 0;
+                while (i < q.size())
+                {
+                    if (q[i] == ':')
+                    {
+                        size_t p = i + 1;
+                        while (p < q.size() && (q[p] == ' ' || q[p] == '\t')) p++;
+                        bool isExcept = false;
+                        size_t kwLen = 0;
+                        if (q.compare(p, 6, "except") == 0 && (p + 6 == q.size() || !isalnum(static_cast<unsigned char>(q[p + 6]))))
+                        {
+                            isExcept = true;
+                            kwLen = 6;
+                        }
+                        else if (q.compare(p, 6, "not in") == 0 && (p + 6 == q.size() || !isalnum(static_cast<unsigned char>(q[p + 6]))))
+                        {
+                            isExcept = true;
+                            kwLen = 6;
+                        }
+                        else if (q.compare(p, 3, "!in") == 0 && (p + 3 == q.size() || !isalnum(static_cast<unsigned char>(q[p + 3]))))
+                        {
+                            isExcept = true;
+                            kwLen = 3;
+                        }
+
+                        if (isExcept)
+                        {
+                            size_t valStart = p + kwLen;
+                            while (valStart < q.size() && (q[valStart] == ' ' || q[valStart] == '\t')) valStart++;
+
+                            if (valStart < q.size() && q[valStart] == '[')
+                            {
+                                size_t depth = 0;
+                                size_t j = valStart;
+                                char inStr = 0;
+                                while (j < q.size())
+                                {
+                                    char c = q[j];
+                                    if (inStr)
+                                    {
+                                        if (c == inStr) inStr = 0;
+                                    }
+                                    else if (c == '\'' || c == '"' || c == '`')
+                                    {
+                                        inStr = c;
+                                    }
+                                    else if (c == '[')
+                                    {
+                                        depth++;
+                                    }
+                                    else if (c == ']')
+                                    {
+                                        depth--;
+                                        if (depth == 0) break;
+                                    }
+                                    j++;
+                                }
+                                if (j < q.size() && depth == 0)
+                                {
+                                    transformed.append(q.substr(i, p - i));
+                                    transformed.append("{ not: ");
+                                    transformed.append(q.substr(valStart, j - valStart + 1));
+                                    transformed.append(" }");
+                                    i = j + 1;
+                                    continue;
+                                }
+                            }
+                            else
+                            {
+                                size_t j = valStart;
+                                char inStr = 0;
+                                size_t braceDepth = 0;
+                                while (j < q.size())
+                                {
+                                    char c = q[j];
+                                    if (inStr)
+                                    {
+                                        if (c == inStr) inStr = 0;
+                                    }
+                                    else if (c == '\'' || c == '"' || c == '`')
+                                    {
+                                        inStr = c;
+                                    }
+                                    else if (c == '{' || c == '(' || c == '[')
+                                    {
+                                        braceDepth++;
+                                    }
+                                    else if (c == '}' || c == ')' || c == ']')
+                                    {
+                                        if (braceDepth == 0) break;
+                                        braceDepth--;
+                                    }
+                                    else if (c == ',' && braceDepth == 0)
+                                    {
+                                        break;
+                                    }
+                                    j++;
+                                }
+                                std::string singleVal = q.substr(valStart, j - valStart);
+                                size_t sFirst = singleVal.find_first_not_of(" \t\r\n");
+                                size_t sLast = singleVal.find_last_not_of(" \t\r\n");
+                                if (sFirst != std::string::npos) singleVal = singleVal.substr(sFirst, sLast - sFirst + 1);
+
+                                transformed.append(q.substr(i, p - i));
+                                transformed.append("{ not: ");
+                                transformed.append(singleVal);
+                                transformed.append(" }");
+                                i = j;
+                                continue;
+                            }
+                        }
+                    }
+                    transformed.push_back(q[i]);
+                    i++;
+                }
+                q = transformed;
+
+                // Wrap object literal in parentheses
+                if (q.front() == '{' && q.back() == '}')
+                {
+                    return "(" + q + ")";
+                }
+                else
+                {
+                    return "({" + q + "})";
+                }
+            }
+
             bool isArrow = false;
             size_t arrowPos = q.find("=>");
             if (arrowPos != std::string::npos)
@@ -1144,17 +1498,12 @@ namespace safe_commands
                 return q;
             }
 
-            if ((q.find("e.") != std::string::npos || q.find("e[") != std::string::npos) &&
-                q.find("=>") == std::string::npos)
+            if (q.find("e.") != std::string::npos || q.find("e[") != std::string::npos ||
+                q.find('>') != std::string::npos || q.find('<') != std::string::npos ||
+                q.find("==") != std::string::npos || q.find("!=") != std::string::npos ||
+                q.find("&&") != std::string::npos || q.find("||") != std::string::npos)
             {
-                return "e => (" + q + ")";
-            }
-
-            if (q.front() != '{' && q.front() != '(' && q.find(':') != std::string::npos &&
-                q.find('?') == std::string::npos && q.find(';') == std::string::npos &&
-                q.find("=>") == std::string::npos)
-            {
-                return "({" + q + "})";
+                return "e => { try { with (e) { with ((e && e.data) || {}) { return Boolean(" + q + "); } } } catch { return false; } }";
             }
 
             return q;
