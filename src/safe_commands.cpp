@@ -16,6 +16,7 @@
 #include <set>
 #include <unordered_map>
 #include <unordered_set>
+#include <sstream>
 
 #include "aced.h"
 #include "acedads.h"
@@ -1253,6 +1254,10 @@ namespace safe_commands
             entitiesVal = JS_GetPropertyStr(context, options, "entities");
             if (JS_IsUndefined(entitiesVal))
             {
+                entitiesVal = JS_GetPropertyStr(context, options, "handles");
+            }
+            if (JS_IsUndefined(entitiesVal))
+            {
                 entitiesVal = JS_GetPropertyStr(context, options, "ids");
             }
             JSValue impliedVal = JS_GetPropertyStr(context, options, "implied");
@@ -1512,6 +1517,10 @@ namespace safe_commands
                 getFn = JS_GetPropertyStr(context, options, "out");
             }
             entitiesVal = JS_GetPropertyStr(context, options, "entities");
+            if (JS_IsUndefined(entitiesVal))
+            {
+                entitiesVal = JS_GetPropertyStr(context, options, "handles");
+            }
             if (JS_IsUndefined(entitiesVal))
             {
                 entitiesVal = JS_GetPropertyStr(context, options, "ids");
@@ -2346,16 +2355,179 @@ namespace safe_commands
         return RTERROR;
     }
 
-    int lispSsGet(resbuf *rb)
+    std::string buildHandlesJsArray(const std::vector<std::string> &handles)
     {
-        std::string jsCode = "editor.ssGet();";
-        if (rb != nullptr && rb->restype == RTSTR && rb->resval.rstring != nullptr)
+        std::string s = "[";
+        for (size_t i = 0; i < handles.size(); ++i)
         {
-            const std::string arg = normalizeShowQuery(command_text::toUtf8(rb->resval.rstring));
-            jsCode = "editor.ssGet(" + arg + ");";
+            if (i > 0) s += ",";
+            s += "\"" + handles[i] + "\"";
+        }
+        s += "]";
+        return s;
+    }
+
+    bool extractHandlesFromResbuf(resbuf *&rb, std::vector<std::string> &handles, bool &hadSelection)
+    {
+        hadSelection = false;
+        handles.clear();
+        if (rb == nullptr)
+        {
+            return false;
         }
 
-        const js_engine::EvalResult result = js_engine::evalForRepl(jsCode);
+        if (rb->restype == RTPICKS)
+        {
+            hadSelection = true;
+            Adesk::Int32 len = 0;
+            if (acedSSLength(rb->resval.rlname, &len) == RTNORM && len > 0)
+            {
+                std::unordered_set<std::string> seen;
+                for (Adesk::Int32 i = 0; i < len; ++i)
+                {
+                    ads_name ent;
+                    if (acedSSName(rb->resval.rlname, i, ent) == RTNORM)
+                    {
+                        AcDbObjectId id;
+                        if (acdbGetObjectId(id, ent) == Acad::eOk && id.isValid() && !id.isErased())
+                        {
+                            std::string h = handleToString(id.handle());
+                            if (!h.empty() && seen.insert(h).second)
+                            {
+                                handles.push_back(h);
+                            }
+                        }
+                    }
+                }
+            }
+            rb = rb->rbnext;
+            return true;
+        }
+
+        if (rb->restype == RTENAME)
+        {
+            hadSelection = true;
+            AcDbObjectId id;
+            if (acdbGetObjectId(id, rb->resval.rlname) == Acad::eOk && id.isValid() && !id.isErased())
+            {
+                std::string h = handleToString(id.handle());
+                if (!h.empty())
+                {
+                    handles.push_back(h);
+                }
+            }
+            rb = rb->rbnext;
+            return true;
+        }
+
+        if (rb->restype == RTLB)
+        {
+            hadSelection = true;
+            rb = rb->rbnext;
+            int depth = 1;
+            std::unordered_set<std::string> seen;
+            while (rb != nullptr && depth > 0)
+            {
+                if (rb->restype == RTLB)
+                {
+                    depth++;
+                }
+                else if (rb->restype == RTLE)
+                {
+                    depth--;
+                }
+                else if (rb->restype == RTENAME)
+                {
+                    AcDbObjectId id;
+                    if (acdbGetObjectId(id, rb->resval.rlname) == Acad::eOk && id.isValid() && !id.isErased())
+                    {
+                        std::string h = handleToString(id.handle());
+                        if (!h.empty() && seen.insert(h).second)
+                        {
+                            handles.push_back(h);
+                        }
+                    }
+                }
+                else if (rb->restype == RTSTR && rb->resval.rstring != nullptr)
+                {
+                    std::string h = command_text::toUtf8(rb->resval.rstring);
+                    if (!h.empty() && seen.insert(h).second)
+                    {
+                        handles.push_back(h);
+                    }
+                }
+                rb = rb->rbnext;
+            }
+            return true;
+        }
+
+        if (rb->restype == RTNIL)
+        {
+            hadSelection = true;
+            rb = rb->rbnext;
+            return true;
+        }
+
+        if (rb->restype == RTSTR && rb->rbnext != nullptr && rb->rbnext->restype == RTSTR)
+        {
+            std::string firstStr = command_text::toUtf8(rb->resval.rstring);
+            if (!firstStr.empty() && firstStr.find_first_of(" \t\r\n{}:=>") == std::string::npos)
+            {
+                hadSelection = true;
+                handles.push_back(firstStr);
+                rb = rb->rbnext;
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    int lispSsGet(resbuf *rb)
+    {
+        bool hadSelection = false;
+        std::vector<std::string> handles;
+        extractHandlesFromResbuf(rb, handles, hadSelection);
+
+        std::string jsCode;
+        if (hadSelection)
+        {
+            std::string handlesJs = buildHandlesJsArray(handles);
+            if (rb != nullptr && rb->restype == RTSTR && rb->resval.rstring != nullptr)
+            {
+                const std::string arg = normalizeShowQuery(command_text::toUtf8(rb->resval.rstring));
+                if (arg.rfind("{", 0) == 0)
+                {
+                    jsCode = "editor.ssGet(Object.assign({ handles: " + handlesJs + " }, (" + arg + ")));";
+                }
+                else
+                {
+                    jsCode = "editor.ssGet({ handles: " + handlesJs + ", filter: (" + arg + ") });";
+                }
+            }
+            else
+            {
+                jsCode = "editor.ssGet({ handles: " + handlesJs + " });";
+            }
+        }
+        else
+        {
+            if (rb != nullptr && rb->restype == RTSTR && rb->resval.rstring != nullptr)
+            {
+                const std::string arg = normalizeShowQuery(command_text::toUtf8(rb->resval.rstring));
+                jsCode = "editor.ssGet(" + arg + ");";
+            }
+            else
+            {
+                jsCode = "editor.ssGet();";
+            }
+        }
+
+        js_engine::EvalResult result = js_engine::evalJson(jsCode);
+        if (!result.ok)
+        {
+            result = js_engine::evalForRepl(jsCode);
+        }
         if (result.ok)
         {
             const std::basic_string<ACHAR> resStr = command_text::fromUtf8(result.text);
@@ -2369,9 +2541,13 @@ namespace safe_commands
 
     int lispSsSet(resbuf *rb)
     {
+        bool hadSelection = false;
+        std::vector<std::string> handles;
+        extractHandlesFromResbuf(rb, handles, hadSelection);
+
         if (rb == nullptr || rb->restype != RTSTR || rb->resval.rstring == nullptr)
         {
-            acutPrintf(ACRX_T("\nError: (ss-set <query-options>) expects a string argument."));
+            acutPrintf(ACRX_T("\nError: (ss-set [ss] <patch-options>) expects a string argument."));
             acedRetNil();
             return RTERROR;
         }
@@ -2379,20 +2555,44 @@ namespace safe_commands
         const std::string arg = command_text::toUtf8(rb->resval.rstring);
         std::string norm = normalizeShowQuery(arg);
         std::string jsCode;
-        if (norm.rfind("(() =>", 0) == 0)
+
+        if (hadSelection)
         {
-            jsCode = "editor.ssSet(" + norm + ");";
-        }
-        else if (norm.find("set") != std::string::npos && norm.find(':') != std::string::npos)
-        {
-            jsCode = "editor.ssSet(" + norm + ");";
+            std::string handlesJs = buildHandlesJsArray(handles);
+            if (norm.rfind("(() =>", 0) == 0)
+            {
+                jsCode = "editor.ssSet(Object.assign({ handles: " + handlesJs + " }, (" + norm + ")()));";
+            }
+            else if (norm.find("set") != std::string::npos && norm.find(':') != std::string::npos)
+            {
+                jsCode = "editor.ssSet(Object.assign({ handles: " + handlesJs + " }, (" + norm + ")));";
+            }
+            else
+            {
+                jsCode = "editor.ssSet({ handles: " + handlesJs + ", set: (" + norm + ") });";
+            }
         }
         else
         {
-            jsCode = "editor.ssSet({ set: " + norm + " });";
+            if (norm.rfind("(() =>", 0) == 0)
+            {
+                jsCode = "editor.ssSet(" + norm + ");";
+            }
+            else if (norm.find("set") != std::string::npos && norm.find(':') != std::string::npos)
+            {
+                jsCode = "editor.ssSet(" + norm + ");";
+            }
+            else
+            {
+                jsCode = "editor.ssSet({ set: " + norm + " });";
+            }
         }
 
-        const js_engine::EvalResult result = js_engine::evalForRepl(jsCode);
+        js_engine::EvalResult result = js_engine::evalJson(jsCode);
+        if (!result.ok)
+        {
+            result = js_engine::evalForRepl(jsCode);
+        }
         if (result.ok)
         {
             acedRetVoid();
@@ -2406,25 +2606,77 @@ namespace safe_commands
 
     int lispSsQuery(resbuf *rb)
     {
-        if (rb == nullptr || rb->restype != RTSTR || rb->resval.rstring == nullptr)
-        {
-            acutPrintf(ACRX_T("\nError: (ss-query <query-options>) expects a string argument."));
-            acedRetNil();
-            return RTERROR;
-        }
+        bool hadSelection = false;
+        std::vector<std::string> handles;
+        extractHandlesFromResbuf(rb, handles, hadSelection);
 
-        const std::string arg = command_text::toUtf8(rb->resval.rstring);
         std::string jsCode;
-        if (query_dsl::isDslQuery(arg))
+        if (hadSelection)
         {
-            jsCode = "editor.ssQuery(" + query_dsl::compileToSsQueryOptions(arg) + ");";
+            std::string handlesJs = buildHandlesJsArray(handles);
+            if (rb != nullptr && rb->restype == RTSTR && rb->resval.rstring != nullptr)
+            {
+                const std::string arg = command_text::toUtf8(rb->resval.rstring);
+                if (query_dsl::isDslQuery(arg))
+                {
+                    query_dsl::DslParseResult parsed = query_dsl::parse(arg);
+                    const std::string fn = query_dsl::compileToJsFunction(arg, "entries");
+                    std::ostringstream ss;
+                    ss << "editor.ssQuery({\n"
+                       << "  handles: " << handlesJs << ",\n"
+                       << "  implied: " << (parsed.options.implied ? "true" : "false") << ",\n"
+                       << "  query: " << fn << "\n"
+                       << "});";
+                    jsCode = ss.str();
+                }
+                else
+                {
+                    std::string norm = normalizeShowQuery(arg);
+                    if (norm.rfind("{", 0) == 0)
+                    {
+                        jsCode = "editor.ssQuery(Object.assign({ handles: " + handlesJs + " }, (" + norm + ")));";
+                    }
+                    else if (norm.find("=>") != std::string::npos || norm.rfind("function", 0) == 0)
+                    {
+                        jsCode = "editor.ssQuery({ handles: " + handlesJs + ", filter: (" + norm + ") });";
+                    }
+                    else
+                    {
+                        jsCode = "editor.ssQuery(Object.assign({ handles: " + handlesJs + " }, (" + norm + ")));";
+                    }
+                }
+            }
+            else
+            {
+                jsCode = "editor.ssQuery({ handles: " + handlesJs + " });";
+            }
         }
         else
         {
-            std::string norm = normalizeShowQuery(arg);
-            jsCode = "editor.ssQuery(" + norm + ");";
+            if (rb == nullptr || rb->restype != RTSTR || rb->resval.rstring == nullptr)
+            {
+                acutPrintf(ACRX_T("\nError: (ss-query [ss] <query-options>) expects a string argument."));
+                acedRetNil();
+                return RTERROR;
+            }
+
+            const std::string arg = command_text::toUtf8(rb->resval.rstring);
+            if (query_dsl::isDslQuery(arg))
+            {
+                jsCode = "editor.ssQuery(" + query_dsl::compileToSsQueryOptions(arg) + ");";
+            }
+            else
+            {
+                std::string norm = normalizeShowQuery(arg);
+                jsCode = "editor.ssQuery(" + norm + ");";
+            }
         }
-        const js_engine::EvalResult result = js_engine::evalForRepl(jsCode);
+
+        js_engine::EvalResult result = js_engine::evalJson(jsCode);
+        if (!result.ok)
+        {
+            result = js_engine::evalForRepl(jsCode);
+        }
         if (result.ok)
         {
             const std::basic_string<ACHAR> resStr = command_text::fromUtf8(result.text);
@@ -2432,6 +2684,7 @@ namespace safe_commands
             return RTNORM;
         }
 
+        acutPrintf(ACRX_T("\n(ss-query) error: %s\n"), command_text::fromUtf8(result.text).c_str());
         acedRetNil();
         return RTERROR;
     }
