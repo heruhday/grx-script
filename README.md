@@ -285,15 +285,23 @@ Command:
 
 ---
 
-## Declarative Object Pattern Filtering (`SS-GET`, `SS-SET`, `SS-QUERY`, `E-GET`)
+## Declarative Object Pattern & Filter DSL (`SS-GET`, `SS-SET`, `SS-QUERY`, `E-GET`)
 
-`SS-GET`, `SS-QUERY`, `SS-SET`, and `E-GET` support declarative object pattern queries without requiring verbose arrow functions:
+`SS-GET`, `SS-QUERY`, `SS-SET`, and `E-GET` support a rich, declarative query DSL without requiring verbose JavaScript arrow boilerplate:
 
 ```text
 Command: SS-GET
-Query: {lyr: 'Qs.Room.Corridor', clr: 256}
-Select objects: 2 found
-Select objects: <Enter>
+Query: {clr: except [1, {r: any, g:0, b:0}], data: {code: any, fl: 'Lt.*', code: in ['CT*,'*MR*'], ty: 'AcDbLine'}}
+```
+or with unkeyed conditions and regex patterns:
+```text
+Command: SS-GET
+Query: {clr: any, e: {phone: /\d{3}-\d{4}/g, data: {.h > 1 && .h < 25, section: {.b > 200 && .w < 300}}}}
+```
+or standalone boolean expressions:
+```text
+Command: SS-GET
+Query: e.data.h > 1 && e.data.h < 10
 ```
 
 ### Supported Pattern Syntaxes:
@@ -301,12 +309,33 @@ Select objects: <Enter>
   `{lyr: 'Qs.Room.Corridor', clr: 256}`
 - **Unbraced Shorthand**:
   `lyr: 'Qs.Room.Corridor', clr: 256`
-- **Multi-Value / Array Inclusion (SQL `IN`)**:
-  `{clr: [1, 5, 256]}` *(matches color index 1, 5, or 256)*
+- **Array Inclusion (`in [...]`)**:
+  `{clr: [1, 5, 256]}` or `{code: in ['CT*', '*MR*']}`
+- **Exclusion Matching (`except [...]` / `not in [...]`)**:
+  `{clr: except [1, {r: any, g: 0, b: 0}]}` *(matches anything except ACI 1 or RGB red)*
+- **Any Defined Value (`any`)**:
+  `{clr: any}` or `{code: any}` *(matches any value except `undefined` and `null`)*
+- **Bidirectional Color Matching (ACI $\leftrightarrow$ RGB)**:
+  `{clr: {r: any, g: 0, b: 0}}` matches both TrueColor Red and ACI color index `1` (AutoCAD calculates RGB for ACI colors automatically).
+- **AutoCAD Wildcards & Regular Expressions**:
+  - CAD wildcards: `{code: 'CT*'}` or `{code: in ['CT*', '*MR*']}` *(case-insensitive `acutWcMatch`: `*`, `?`, `#`, `@`, etc.)*
+  - Regex literals: `{phone: /\d{3}-\d{4}/g}` *(automatically resets `lastIndex = 0` between entities)*
+  - Regex strings: `{fl: 'Lt.*'}`
+  - Typo recovery: `{code: in ['CT*,'*MR*']}` is automatically corrected to `['CT*', '*MR*']`
+- **Unkeyed Condition Expressions (`.prop > val`)**:
+  Conditions can be placed directly inside object literals without key prefixes:
+  `{data: {.h > 1 && .h < 25, section: {.b > 200 && .w < 300}}}`
+  *(Leading `.h`, `.b`, `.w` automatically resolve to fields on the scoped object)*
+- **Root Entity Alias (`e:`)**:
+  `{clr: any, e: {phone: /\d{3}-\d{4}/g, data: {...}}}`
+  *(The `e:` block transparently unpacks properties against the root entity)*
+- **Direct Boolean Expression Predicate**:
+  `e.data.h > 1 && e.data.h < 10`
+  *(Wrapped in a safe scoped lambda with try/catch; entities missing `data` or properties cleanly evaluate to `false` without throwing `TypeError`)*
 - **CAD Type Matching**:
   `{ty: 'Line'}` *(matches `AcDbLine` automatically, case-insensitive)*
-- **Nested XData Match**:
-  `{data: {floor: 'Lt1'}}` or directly `{floor: 'Lt1'}`
+- **Nested XData Match & Root Property Fallback**:
+  `{data: {floor: 'Lt1', ty: 'AcDbLine'}}` *(properties like `ty`, `lyr`, `clr`, `hand` fall back to the root entity if not defined in `data`)*
 - **Predicate Function within Pattern**:
   `{clr: c => c !== 256, l: l => l > 1000}`
 
@@ -348,6 +377,12 @@ Load [`lisp/runjs.lsp`](lisp/runjs.lsp) into AutoCAD:
 ```lisp
 ;; Execute DSL query directly from AutoLISP:
 (ss-query "{e.code: [+=e.a/1e6, +=e.l/1e3]} where e.a")
+
+;; Query selection set using pattern DSL:
+(ss-get "{clr: except [1, {r: any, g: 0, b: 0}], data: {.h > 1 && .h < 25}}")
+
+;; Query selection set using boolean expression:
+(ss-get "e.data.h > 1 && e.data.h < 10")
 
 ;; Batch-set entity metadata:
 (ss-set "{code: 'CT1'}")
