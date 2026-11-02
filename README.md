@@ -258,10 +258,11 @@ Select objects: <Enter>
 
 ### Template Query Placeholders (`_0`, `_1`, ...) & Continuous Input Loop
 
-For rapid repetitive tagging in `SS-SET` and `E-SET`, you can define dynamic query templates using `_<number>` placeholders (e.g. `_0`, `_1`, ...).
+For rapid repetitive tagging or querying in `SS-SET`, `SS-GET`, and `E-SET`, you can define dynamic query templates using `_<number>` placeholders (e.g. `_0`, `_1`, ...).
 
-When placeholders are present, **`SS-SET` automatically enters a continuous tagging loop** without exiting back to the `Command:` prompt:
+When placeholders are present, **`SS-SET` and `SS-GET` automatically enter a continuous loop** without exiting back to the `Command:` prompt:
 
+#### 1. Continuous Tagging (`SS-SET`):
 ```text
 Command: SS-SET
 Query <{data: {room: 'Toilet.' + _0}, clr: _1}>: <Enter>
@@ -279,9 +280,29 @@ _0 <Standard>: <Esc>   <-- Press Esc (or Esc at 'Select objects:') to finish
 Command:
 ```
 
-- **Seamless Tagging Loop**: The command keeps prompting for the next set of values and selections until you press `<Esc>` at `_0` or `<Esc>` at `Select objects:`.
+#### 2. Continuous Querying & Inspection (`SS-GET`):
+```text
+Command: SS-GET
+Query <{data: {code: _0, .h > _1}}>: <Enter>
+_0 <'CT1'>: <Enter>
+_1 <1.5>: <Enter>
+Select objects: 2 found
+Select objects: <Enter>
+[ { "id": 12, "ty": "AcDbLine", "data": { "code": "CT1", "h": 2.0 } } ]
+
+_0 <CT1>: CT2
+_1 <1.5>: 0.5
+Select objects: 4 found
+Select objects: <Enter>
+[ ... ]
+
+_0 <CT2>: <Esc>        <-- Press Esc to finish
+Command:
+```
+
+- **Seamless Interactive Loop**: The command keeps prompting for the next set of values and selections until you press `<Esc>` at `_0` or `<Esc>` at `Select objects:`.
 - **Persistent Defaults**: Last entered values are remembered and offered as `<defaults>` on subsequent iterations.
-- **Smart Type Coercion**: Numbers (`1`, `2.5`) remain numbers; unquoted strings (`Basement`, `Standard`) are automatically quoted safely; booleans (`true`/`false`) and arrays (`[1, 2]`) are evaluated as expressions.
+- **Smart Type Coercion**: Numbers (`1`, `2.5`) remain numbers; unquoted strings (`Basement`, `Standard`, `CT1`) are automatically quoted safely; booleans (`true`/`false`) and arrays (`[1, 2]`) are evaluated as expressions.
 
 ---
 
