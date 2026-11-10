@@ -100,6 +100,7 @@ fn set_always_on_top(window: tauri::Window, always_on_top: bool) -> Result<(), S
 }
 
 fn main() {
+    std::env::set_var("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", "--lang=en-US");
     std::panic::set_hook(Box::new(|info| {
         let msg = match info.payload().downcast_ref::<&'static str>() {
             Some(s) => s.to_string(),

@@ -547,6 +547,129 @@ const fmt = (num, digits = 2) => {
   });
 };
 
+// Numeric Input Component strictly adhering to US format (decimal point '.')
+function UsNumberInput({
+  value,
+  onChange,
+  step = 0.1,
+  min,
+  max,
+  className = '',
+  title = '',
+  placeholder = ''
+}) {
+  const [text, setText] = useState(() => (value !== undefined && value !== null ? String(value) : ''));
+
+  useEffect(() => {
+    if (value === undefined || value === null) {
+      setText('');
+      return;
+    }
+    const currentNum = parseFloat(text);
+    const newNum = typeof value === 'number' ? value : parseFloat(value);
+    if (text === '' || text === '-' || Number.isNaN(currentNum) || currentNum !== newNum) {
+      setText(String(value));
+    }
+  }, [value]);
+
+  const handleChange = (e) => {
+    // Replace commas with dots immediately to ensure US format
+    let raw = e.target.value.replace(/,/g, '.');
+    // Allow digits, decimal dot, and optional negative sign
+    raw = raw.replace(/[^0-9.-]/g, '');
+    const parts = raw.split('.');
+    if (parts.length > 2) {
+      raw = parts[0] + '.' + parts.slice(1).join('');
+    }
+    if (raw.indexOf('-') > 0) {
+      raw = (raw.startsWith('-') ? '-' : '') + raw.replace(/-/g, '');
+    }
+    setText(raw);
+    const parsed = parseFloat(raw);
+    if (!Number.isNaN(parsed)) {
+      onChange(parsed, raw);
+    } else if (raw === '' || raw === '-') {
+      onChange(0, raw);
+    }
+  };
+
+  const handleBlur = () => {
+    if (text === '' || text === '-') {
+      setText('0');
+      onChange(0, '0');
+      return;
+    }
+    const parsed = parseFloat(text);
+    if (!Number.isNaN(parsed)) {
+      let finalNum = parsed;
+      if (min !== undefined && finalNum < min) finalNum = min;
+      if (max !== undefined && finalNum > max) finalNum = max;
+      setText(String(finalNum));
+      onChange(finalNum, String(finalNum));
+    }
+  };
+
+  const stepBy = (dir) => {
+    const current = parseFloat(text) || 0;
+    const stepVal = typeof step === 'number' ? step : (parseFloat(step) || 0.1);
+    const stepDecimals = (String(stepVal).split('.')[1] || '').length;
+    let next = dir > 0 ? current + stepVal : current - stepVal;
+    if (stepDecimals > 0) {
+      next = parseFloat(next.toFixed(Math.min(stepDecimals + 1, 4)));
+    }
+    if (min !== undefined && next < min) next = min;
+    if (max !== undefined && next > max) next = max;
+    const str = String(next);
+    setText(str);
+    onChange(next, str);
+  };
+
+  const handleKeyDown = (e) => {
+    if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      stepBy(1);
+    } else if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      stepBy(-1);
+    }
+  };
+
+  return (
+    <div className="relative inline-flex items-center group w-full">
+      <input
+        type="text"
+        inputMode="decimal"
+        lang="en-US"
+        value={text}
+        placeholder={placeholder}
+        title={title}
+        onChange={handleChange}
+        onBlur={handleBlur}
+        onKeyDown={handleKeyDown}
+        className={`${className} pr-4`}
+      />
+      <div className="absolute right-0.5 inset-y-0 flex flex-col justify-center opacity-40 group-hover:opacity-100 transition-opacity pointer-events-auto">
+        <button
+          type="button"
+          tabIndex={-1}
+          onClick={() => stepBy(1)}
+          className="hover:text-amber-300 text-[7px] leading-none px-0.5 py-0.5 text-slate-400 select-none cursor-pointer"
+        >
+          ▲
+        </button>
+        <button
+          type="button"
+          tabIndex={-1}
+          onClick={() => stepBy(-1)}
+          className="hover:text-amber-300 text-[7px] leading-none px-0.5 py-0.5 text-slate-400 select-none cursor-pointer"
+        >
+          ▼
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // Infer category from CAD entity layer / type / XData
 function inferCategoryFromCadEntity(cadEnt) {
   const data = cadEnt.data || {};
@@ -2083,12 +2206,11 @@ export default function App() {
                         </span>
                       </label>
                       <div className="col-span-6 px-2 py-1 flex items-center gap-1.5">
-                        <input
-                          type="number"
+                        <UsNumberInput
                           step={field.step}
                           value={globalXdata[field.key]}
-                          onChange={(e) => handleGlobalXdataChange(field.key, e.target.value)}
-                          className="w-full bg-[#15181c] text-emerald-300 font-mono px-2 py-1 rounded border border-slate-700/80 focus:outline-none focus:border-emerald-400 text-right"
+                          onChange={(val) => handleGlobalXdataChange(field.key, val)}
+                          className="w-full bg-[#15181c] text-emerald-300 font-mono px-2 py-1 rounded border border-slate-700/80 focus:outline-none focus:border-emerald-400 text-right text-xs"
                         />
                         <span className="text-[11px] text-slate-400 w-10 shrink-0 font-mono">
                           {field.unit}
@@ -2168,14 +2290,15 @@ export default function App() {
                     </div>
                     <div className="flex items-center gap-1.5 shrink-0">
                       <span className="text-slate-500 text-xs font-mono">×</span>
-                      <input
-                        type="number"
-                        step="0.05"
-                        value={f.value}
-                        onChange={(e) => handleUpdateFactor(f.id, 'value', e.target.value)}
-                        className="w-16 bg-[#1e2229] text-right font-mono text-amber-300 text-xs px-2 py-1 rounded border border-slate-700 focus:outline-none focus:border-amber-400"
-                        title={`Factor value for ${f.name}`}
-                      />
+                      <div className="w-20">
+                        <UsNumberInput
+                          step={0.05}
+                          value={f.value}
+                          onChange={(val) => handleUpdateFactor(f.id, 'value', val)}
+                          className="w-full bg-[#1e2229] text-right font-mono text-amber-300 text-xs px-2 py-1 rounded border border-slate-700 focus:outline-none focus:border-amber-400"
+                          title={`Factor value for ${f.name}`}
+                        />
+                      </div>
                       <button
                         type="button"
                         onClick={() => handleRemoveFactorRow(f.id)}
