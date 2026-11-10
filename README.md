@@ -90,7 +90,7 @@ The plugin provides safe transaction commands with guaranteed atomicity (automat
 
 | Command | Type | Description |
 | :--- | :--- | :--- |
-| `XPROPS` / `QPROPS` | CLI / LISP | Launches and syncs the WinUI 3 XData & DSL Properties Palette window with live takeoff formulas. |
+| `QTO` / `QPROPS` / `XPROPS` | CLI / LISP | Launches and syncs the Rust Tauri QTO Property Box palette window with live AutoCAD / GstarCAD entity selection & XData synchronization. |
 | `SS-QUERY` | CLI / LISP | Evaluates quantity takeoff and aggregation queries on selection sets using the Query DSL. |
 | `SS-SET` | CLI / LISP | Atomically updates properties of selected entities. Non-CAD properties (e.g. `code: 'CT1'`) are automatically routed to entity XData and projected onto `e.code`. |
 | `SS-GET` | CLI / LISP | Retrieves property snapshots of selected entities as JSON. |

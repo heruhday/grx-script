@@ -87,6 +87,27 @@ if ($Clean) {
     }
 }
 
+# Known SDK locations for AutoCAD and GstarCAD
+$knownSdkPaths = @{
+    "AUTOCAD:2017" = "C:\Autodesk\Autodesk_ObjectARX_2017_Win_64_and_32_Bit\inc\AcRxDefault.def"
+    "AUTOCAD:2018" = "C:\Autodesk\Autodesk_ObjectARX_2018_Win_64_and_32_Bit\inc\AcRxDefault.def"
+    "AUTOCAD:2019" = "C:\Autodesk\Autodesk_ObjectARX_2019_Win_64_and_32_Bit\inc\AcRxDefault.def"
+    "AUTOCAD:2020" = "C:\Autodesk\ObjectARX_for_AutoCAD_2020_Win_64_bit\inc\AcRxDefault.def"
+    "AUTOCAD:2021" = "C:\Autodesk\ObjectARX_for_AutoCAD_2021_Win_64bit_dlm\inc\AcRxDefault.def"
+    "AUTOCAD:2022" = "C:\Autodesk\ObjectARX_for_AutoCAD_2022_Win_64bit_dlm\inc\AcRxDefault.def"
+    "AUTOCAD:2023" = "C:\Autodesk\ObjectARX_for_AutoCAD_2023_Win_64bit_dlm\inc\AcRxDefault.def"
+    "AUTOCAD:2024" = "C:\Autodesk\ObjectARX_for_AutoCAD_2024_Win_64bit_dlm\inc\AcRxDefault.def"
+    "GSTARCAD:2026" = "C:\GstarCAD\grxsdk\arx\inc\AcRxDefault.def"
+}
+
+function Test-SdkInstalled($plat, $ver) {
+    $k = "$plat`:$ver"
+    if ($knownSdkPaths.ContainsKey($k)) {
+        return (Test-Path $knownSdkPaths[$k])
+    }
+    return $true
+}
+
 # Determine target list
 $targets = [System.Collections.Generic.List[PSObject]]::new()
 
@@ -100,10 +121,21 @@ if ($All) {
 } elseif ($PSCmdlet.ParameterSetName -eq "SpecificVersion" -and $Version) {
     $targets.Add([PSCustomObject]@{ Platform="AUTOCAD"; Version=$Version; Key=$Version })
 } else {
-    # Default: AutoCAD 2018, AutoCAD 2021, and GstarCAD 2026
-    $targets.Add([PSCustomObject]@{ Platform="AUTOCAD"; Version="2018"; Key="2018" })
-    $targets.Add([PSCustomObject]@{ Platform="AUTOCAD"; Version="2021"; Key="2021" })
-    $targets.Add([PSCustomObject]@{ Platform="GSTARCAD"; Version="2026"; Key="gstarcad_2026" })
+    # Default: auto-detect installed SDKs among standard versions
+    $candidates = @(
+        [PSCustomObject]@{ Platform="AUTOCAD"; Version="2021"; Key="2021" },
+        [PSCustomObject]@{ Platform="AUTOCAD"; Version="2018"; Key="2018" },
+        [PSCustomObject]@{ Platform="GSTARCAD"; Version="2026"; Key="gstarcad_2026" }
+    )
+    foreach ($cand in $candidates) {
+        if (Test-SdkInstalled $cand.Platform $cand.Version) {
+            $targets.Add($cand)
+        }
+    }
+    if ($targets.Count -eq 0) {
+        # Fallback to AutoCAD 2021 if none detected
+        $targets.Add([PSCustomObject]@{ Platform="AUTOCAD"; Version="2021"; Key="2021" })
+    }
 }
 
 $distPath = Join-Path $scriptRoot $OutDir
@@ -133,6 +165,13 @@ foreach ($tgt in $targets) {
     New-Item -ItemType Directory -Force -Path $targetDir | Out-Null
     New-Item -ItemType Directory -Force -Path $bundleVerDir | Out-Null
 
+    # Check if SDK is available
+    if (-not (Test-SdkInstalled $plat $ver)) {
+        Write-Warning "SDK for $plat $ver was not found. Skipping build."
+        $results.Add([PSCustomObject]@{ Platform=$plat; Version=$ver; Status="Skipped (Missing SDK)"; Size="-"; Binary="-" })
+        continue
+    }
+
     # 1. CMake Configure
     $configureArgs = @(
         "-S", $scriptRoot,
@@ -147,8 +186,8 @@ foreach ($tgt in $targets) {
 
     & $cmakeExe @configureArgs
     if ($LASTEXITCODE -ne 0) {
-        Write-Error "Failed to configure CMake for $plat $ver."
-        $results.Add([PSCustomObject]@{ Platform=$plat; Version=$ver; Status="Failed (Configure)"; Binary="-" })
+        Write-Warning "Failed to configure CMake for $plat $ver."
+        $results.Add([PSCustomObject]@{ Platform=$plat; Version=$ver; Status="Failed (Configure)"; Size="-"; Binary="-" })
         continue
     }
 
@@ -160,8 +199,8 @@ foreach ($tgt in $targets) {
     )
     & $cmakeExe @buildArgs
     if ($LASTEXITCODE -ne 0) {
-        Write-Error "Failed to build for $plat $ver."
-        $results.Add([PSCustomObject]@{ Platform=$plat; Version=$ver; Status="Failed (Build)"; Binary="-" })
+        Write-Warning "Failed to build for $plat $ver."
+        $results.Add([PSCustomObject]@{ Platform=$plat; Version=$ver; Status="Failed (Build)"; Size="-"; Binary="-" })
         continue
     }
 
@@ -211,6 +250,21 @@ $runjsLsp = Join-Path $scriptRoot "lisp\runjs.lsp"
 if (Test-Path $runjsLsp) {
     Copy-Item -Path $runjsLsp -Destination (Join-Path $distPath "runjs.lsp") -Force
     Copy-Item -Path $runjsLsp -Destination (Join-Path $distPath "arx-script.bundle\Contents\runjs.lsp") -Force
+}
+
+# Copy QTO Property Box (Tauri executable) to dist/bin and bundle dirs if built
+$tauriExeRelease = Join-Path $scriptRoot "qto-property-box\src-tauri\target\release\qto-property-box.exe"
+$tauriExeDebug = Join-Path $scriptRoot "qto-property-box\src-tauri\target\debug\qto-property-box.exe"
+$tauriExe = if (Test-Path $tauriExeRelease) { $tauriExeRelease } elseif (Test-Path $tauriExeDebug) { $tauriExeDebug } else { $null }
+
+if ($tauriExe) {
+    try { Copy-Item -Path $tauriExe -Destination (Join-Path $distBin "qto-property-box.exe") -Force -ErrorAction SilentlyContinue } catch {}
+    if (Test-Path (Join-Path $distPath "2021")) {
+        try { Copy-Item -Path $tauriExe -Destination (Join-Path $distPath "2021\qto-property-box.exe") -Force -ErrorAction SilentlyContinue } catch {}
+    }
+    if (Test-Path (Join-Path $distPath "arx-script.bundle\Contents\2021")) {
+        try { Copy-Item -Path $tauriExe -Destination (Join-Path $distPath "arx-script.bundle\Contents\2021\qto-property-box.exe") -Force -ErrorAction SilentlyContinue } catch {}
+    }
 }
 
 Write-Host "`n==========================================================" -ForegroundColor Cyan

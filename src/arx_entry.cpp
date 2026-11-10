@@ -240,7 +240,9 @@ namespace
         acrxDynamicLinker->registerAppMDIAware(appId);
 
         const bool jsEngineReady = js_engine::initialize();
+        commands::initIpcBridge();
         selection_event::install();
+        commands::startJsIpcServer(8123);
 
         // Register AutoCAD Commands
         registerCommand(ACRX_T("HELLOARX"), ACRX_T("HELLOARX"), commands::helloArx);
@@ -250,6 +252,9 @@ namespace
         registerCommand(ACRX_T("js-execute"), ACRX_T("js-execute"), commands::jsExecute);
         const Acad::ErrorStatus jsReplStatus = registerCommand(ACRX_T("js:repl"), ACRX_T("js:repl"), commands::jsRepl);
         const Acad::ErrorStatus jsIpcStatus = registerCommand(ACRX_T("js:server"), ACRX_T("js:server"), commands::jsServer);
+        registerCommand(ACRX_T("QTO"), ACRX_T("QTO"), commands::qtoProps);
+        registerCommand(ACRX_T("QPROPS"), ACRX_T("QPROPS"), commands::qtoProps);
+        registerCommand(ACRX_T("XPROPS"), ACRX_T("XPROPS"), commands::qtoProps);
 
         // Register Safe Transaction Commands
         registerCommand(ACRX_T("SS-SET"), ACRX_T("SS-SET"), safe_commands::cmdSsSet);
@@ -302,6 +307,7 @@ namespace
         acedUndef(ACRX_T("e-show"), kLispEShow);
 
         commands::stopJsIpcServer();
+        commands::shutdownIpcBridge();
         selection_event::uninstall();
         js_engine::shutdown();
         acedRegCmds->removeGroup(kCommandGroup);

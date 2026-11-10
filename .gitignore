@@ -16,3 +16,10 @@ scratch/
 *.ilk
 x64/
 ARM64/
+
+# Node & Tauri
+node_modules/
+target/
+*.log
+*.tmp
+qto-property-box/dist/

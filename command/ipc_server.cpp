@@ -20,6 +20,7 @@
 #include "aced.h"
 #include "adscodes.h"
 #include "acdocman.h"
+#include "actrans.h"
 #include "acutads.h"
 #include "commands.h"
 #include "text_util.h"
@@ -44,18 +45,21 @@ public:
     explicit DocumentLockGuard(AcApDocument* document)
         : document_(document), locked_(false), status_(Acad::eOk)
     {
-        if (document_ == nullptr || acDocManager == nullptr || document_->myLockMode() != AcAp::kNone)
+        if (document_ == nullptr || acDocManager == nullptr)
         {
             return;
         }
 
-        status_ = acDocManager->lockDocument(document_, AcAp::kWrite);
-        locked_ = status_ == Acad::eOk;
+        if ((document_->myLockMode() & AcAp::kWrite) == 0)
+        {
+            status_ = acDocManager->lockDocument(document_, AcAp::kWrite, nullptr, nullptr, false);
+            locked_ = (status_ == Acad::eOk);
+        }
     }
 
     ~DocumentLockGuard()
     {
-        if (locked_ && acDocManager != nullptr)
+        if (locked_ && acDocManager != nullptr && document_ != nullptr)
         {
             acDocManager->unlockDocument(document_);
         }
@@ -192,53 +196,164 @@ std::string jsonError(const std::string& message)
     return result;
 }
 
-void applicationEvalCallback(void* data)
+const UINT WM_GRX_IPC_EVAL = WM_USER + 0x7123;
+HWND g_hBridgeWnd = nullptr;
+const wchar_t* const kBridgeClassName = L"GrxScriptIpcBridgeClass";
+
+void executeOnMainThread(IpcEvalRequest* request)
 {
-    IpcEvalRequest* request = static_cast<IpcEvalRequest*>(data);
+    if (request == nullptr)
+    {
+        return;
+    }
+
     js_engine::EvalResult result;
+    try
+    {
+        AcApDocument* document = acDocManager != nullptr ? acDocManager->curDocument() : nullptr;
+        DocumentLockGuard documentLock(document);
+        if (!documentLock.ok())
+        {
+            result = {false, jsonError("failed to lock current document: " + std::to_string(static_cast<int>(documentLock.status())))};
+        }
+        else
+        {
+            result = js_engine::evalJson(request->script);
+            if (result.ok)
+            {
+                js_engine::eval("if (globalThis.transaction !== null) { tm.commit(); }");
+            }
+            else
+            {
+                js_engine::eval("if (globalThis.transaction !== null) { tm.abort(); }");
+            }
+        }
+    }
+    catch (const std::exception& ex)
+    {
+        result = {false, jsonError(std::string("Exception: ") + ex.what())};
+    }
+    catch (...)
+    {
+        result = {false, jsonError("Unknown exception during script evaluation")};
+    }
 
-    AcApDocument* document = acDocManager != nullptr ? acDocManager->curDocument() : nullptr;
-    DocumentLockGuard documentLock(document);
-    if (!documentLock.ok())
+    request->result = result;
+    request->done = true;
+}
+
+LRESULT CALLBACK ipcBridgeWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
+{
+    if (msg == WM_GRX_IPC_EVAL)
     {
-        result = {false, jsonError("failed to lock current document: " + std::to_string(static_cast<int>(documentLock.status())))};
+        IpcEvalRequest* request = reinterpret_cast<IpcEvalRequest*>(wParam);
+        executeOnMainThread(request);
+        return 1;
     }
-    else
+    return DefWindowProcW(hwnd, msg, wParam, lParam);
+}
+
+void ensureBridgeWindowOnMainThread()
+{
+    if (g_hBridgeWnd != nullptr && IsWindow(g_hBridgeWnd))
     {
-        result = js_engine::evalJson(request->script);
+        return;
     }
 
+    HINSTANCE hInst = GetModuleHandleW(nullptr);
+
+    WNDCLASSEXW wc = {};
+    wc.cbSize = sizeof(wc);
+    wc.lpfnWndProc = ipcBridgeWndProc;
+    wc.hInstance = hInst;
+    wc.lpszClassName = kBridgeClassName;
+    RegisterClassExW(&wc);
+
+    g_hBridgeWnd = CreateWindowExW(
+        0,
+        kBridgeClassName,
+        L"GrxScriptIpcBridge",
+        0, 0, 0, 0, 0,
+        HWND_MESSAGE,
+        nullptr,
+        hInst,
+        nullptr
+    );
+}
+
+void destroyBridgeWindow()
+{
+    if (g_hBridgeWnd != nullptr && IsWindow(g_hBridgeWnd))
     {
-        std::lock_guard<std::mutex> lock(request->mutex);
-        request->result = result;
-        request->done = true;
+        DestroyWindow(g_hBridgeWnd);
+        g_hBridgeWnd = nullptr;
+        UnregisterClassW(kBridgeClassName, GetModuleHandleW(nullptr));
     }
-    request->condition.notify_one();
 }
 
 std::string evaluateScriptInApplicationContext(const std::string& script)
 {
-    IpcEvalRequest* request = new IpcEvalRequest(script);
-    acDocManager->executeInApplicationContext(applicationEvalCallback, request);
+    if (g_hBridgeWnd == nullptr || !IsWindow(g_hBridgeWnd))
+    {
+        return jsonError("AutoCAD IPC bridge window not ready");
+    }
 
-    std::unique_lock<std::mutex> lock(request->mutex);
-    request->condition.wait(lock, [request]() { return request->done; });
-    const std::string response = request->result.text;
-    lock.unlock();
+    IpcEvalRequest request(script);
 
-    delete request;
-    return response;
+    DWORD_PTR dwResult = 0;
+    LRESULT lr = SendMessageTimeoutW(
+        g_hBridgeWnd,
+        WM_GRX_IPC_EVAL,
+        reinterpret_cast<WPARAM>(&request),
+        0,
+        SMTO_NORMAL,
+        8000,
+        &dwResult
+    );
+
+    if (lr == 0)
+    {
+        DWORD err = GetLastError();
+        return jsonError(err == ERROR_TIMEOUT ? "AutoCAD request timed out (busy)" : "Failed to marshal to AutoCAD main thread");
+    }
+
+    return request.result.text;
 }
 
 std::string readClientScript(SOCKET client)
 {
+    DWORD recvTimeoutMs = 3000;
+    setsockopt(client, SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<const char*>(&recvTimeoutMs), sizeof(recvTimeoutMs));
+
     std::string script;
-    std::vector<char> buffer(4096);
-    const int received = recv(client, buffer.data(), static_cast<int>(buffer.size()), 0);
-    if (received > 0)
+    std::vector<char> buffer(8192);
+    const int firstRecv = recv(client, buffer.data(), static_cast<int>(buffer.size()), 0);
+    if (firstRecv <= 0)
     {
-        script.assign(buffer.data(), buffer.data() + received);
+        return script;
     }
+    script.assign(buffer.data(), buffer.data() + firstRecv);
+
+    // Continue reading any remaining chunks that arrive immediately
+    while (script.size() < static_cast<size_t>(kMaxScriptBytes))
+    {
+        fd_set readSet;
+        FD_ZERO(&readSet);
+        FD_SET(client, &readSet);
+        timeval tv = {0, 5000}; // 5ms poll for trailing chunks
+        const int ready = select(0, &readSet, nullptr, nullptr, &tv);
+        if (ready <= 0)
+        {
+            break;
+        }
+        const int n = recv(client, buffer.data(), static_cast<int>(buffer.size()), 0);
+        if (n <= 0)
+        {
+            break;
+        }
+        script.append(buffer.data(), buffer.data() + n);
+    }
+
     return script;
 }
 
@@ -329,13 +444,6 @@ void serverThreadMain(int port)
         if (client == INVALID_SOCKET)
         {
             break;
-        }
-
-        if (g_clientBusy)
-        {
-            sendAll(client, jsonError("IPC server is busy"));
-            closeSocketHandle(client);
-            continue;
         }
 
         if (g_clientThread.joinable())
@@ -433,19 +541,131 @@ void jsServer()
     acutPrintf(ACRX_T("\nJS IPC server listening on 127.0.0.1:%d. Run js:server again to stop."), port);
 }
 
+void initIpcBridge()
+{
+    ensureBridgeWindowOnMainThread();
+}
+
+void shutdownIpcBridge()
+{
+    destroyBridgeWindow();
+}
+
 void stopJsIpcServer()
 {
     stopServer();
+    destroyBridgeWindow();
 }
 
 bool startJsIpcServer(int port)
 {
+    ensureBridgeWindowOnMainThread();
     return startServer(port);
 }
 
 bool isJsIpcServerRunning()
 {
     return g_running;
+}
+
+void qtoProps()
+{
+    ensureBridgeWindowOnMainThread();
+    if (!g_running)
+    {
+        startServer(kDefaultIpcPort);
+        acutPrintf(ACRX_T("\n[QTO] IPC server active on 127.0.0.1:%d"), kDefaultIpcPort);
+    }
+
+    // If QTO Property Box window is already open, restore and focus it
+    HWND existingWnd = FindWindowW(nullptr, L"QTO Property Box");
+    if (existingWnd != nullptr)
+    {
+        if (IsIconic(existingWnd))
+        {
+            ShowWindow(existingWnd, SW_RESTORE);
+        }
+        else
+        {
+            ShowWindow(existingWnd, SW_SHOW);
+        }
+        SetForegroundWindow(existingWnd);
+        acutPrintf(ACRX_T("\n[QTO] QTO Property Box focused.\n"));
+        return;
+    }
+
+    // Locate module directory of loaded .arx / .grx
+    HMODULE hMod = nullptr;
+    GetModuleHandleExW(
+        GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+        reinterpret_cast<LPCWSTR>(&qtoProps),
+        &hMod);
+
+    wchar_t modPath[MAX_PATH] = {};
+    std::wstring modDir;
+    if (hMod != nullptr && GetModuleFileNameW(hMod, modPath, MAX_PATH) > 0)
+    {
+        std::wstring full(modPath);
+        size_t pos = full.find_last_of(L"\\/");
+        if (pos != std::wstring::npos)
+        {
+            modDir = full.substr(0, pos);
+        }
+    }
+
+    std::vector<std::wstring> candidates;
+    if (!modDir.empty())
+    {
+        candidates.push_back(modDir + L"\\qto-property-box.exe");
+        candidates.push_back(modDir + L"\\..\\bin\\qto-property-box.exe");
+        candidates.push_back(modDir + L"\\..\\..\\bin\\qto-property-box.exe");
+        candidates.push_back(modDir + L"\\..\\..\\qto-property-box\\src-tauri\\target\\release\\qto-property-box.exe");
+        candidates.push_back(modDir + L"\\..\\..\\..\\qto-property-box\\src-tauri\\target\\release\\qto-property-box.exe");
+    }
+    candidates.push_back(L"C:\\Users\\qsten\\OneDrive - PT. Roket Jaya Abadi\\Heru\\temp\\grx-script\\dist\\bin\\qto-property-box.exe");
+    candidates.push_back(L"C:\\Users\\qsten\\OneDrive - PT. Roket Jaya Abadi\\Heru\\temp\\grx-script\\qto-property-box\\src-tauri\\target\\release\\qto-property-box.exe");
+
+    std::wstring foundExe;
+    for (const auto& cand : candidates)
+    {
+        DWORD attr = GetFileAttributesW(cand.c_str());
+        if (attr != INVALID_FILE_ATTRIBUTES && !(attr & FILE_ATTRIBUTE_DIRECTORY))
+        {
+            foundExe = cand;
+            break;
+        }
+    }
+
+    if (foundExe.empty())
+    {
+        acutPrintf(ACRX_T("\n[QTO] qto-property-box.exe not found. Make sure it is built in qto-property-box/ or dist/bin/.\n"));
+        return;
+    }
+
+    STARTUPINFOW si = {};
+    si.cb = sizeof(si);
+    PROCESS_INFORMATION pi = {};
+    std::wstring cmdLine = L"\"" + foundExe + L"\"";
+    if (CreateProcessW(
+            foundExe.c_str(),
+            &cmdLine[0],
+            nullptr,
+            nullptr,
+            FALSE,
+            0,
+            nullptr,
+            nullptr,
+            &si,
+            &pi))
+    {
+        CloseHandle(pi.hThread);
+        CloseHandle(pi.hProcess);
+        acutPrintf(ACRX_T("\n[QTO] Launched QTO Property Box.\n"));
+    }
+    else
+    {
+        acutPrintf(ACRX_T("\n[QTO] Failed to launch QTO Property Box (error %lu).\n"), GetLastError());
+    }
 }
 }
 

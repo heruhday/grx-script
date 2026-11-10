@@ -1,6 +1,8 @@
 #include "selection_event.h"
 
+#include <atomic>
 #include <cstdio>
+#include <mutex>
 #include <string>
 #include <vector>
 
@@ -34,6 +36,61 @@
 
 namespace
 {
+    std::mutex g_selectionMutex;
+    std::vector<std::string> g_selectedHandles;
+    std::atomic<uint64_t> g_selectionVersion{1};
+
+    void updateSelectionCache(const std::vector<std::string>& handles)
+    {
+        std::lock_guard<std::mutex> lock(g_selectionMutex);
+        if (g_selectedHandles != handles)
+        {
+            g_selectedHandles = handles;
+            g_selectionVersion.fetch_add(1);
+        }
+    }
+
+    std::vector<std::string> collectImpliedSelectionHandles()
+    {
+        std::vector<std::string> handles;
+        ads_name selectionSet;
+        acdbNameClear(selectionSet);
+
+        if (acedSSGet(ACRX_T("I"), nullptr, nullptr, nullptr, selectionSet) == RTNORM)
+        {
+            Adesk::Int32 count = 0;
+            if (acedSSLength(selectionSet, &count) == RTNORM)
+            {
+                handles.reserve(static_cast<size_t>(count));
+                for (Adesk::Int32 i = 0; i < count; ++i)
+                {
+                    ads_name entityName;
+                    acdbNameClear(entityName);
+                    if (acedSSName(selectionSet, i, entityName) != RTNORM)
+                    {
+                        continue;
+                    }
+
+                    AcDbObjectId objectId;
+                    if (acdbGetObjectId(objectId, entityName) != Acad::eOk)
+                    {
+                        continue;
+                    }
+
+                    char text[32] = {};
+                    std::sprintf(
+                        text,
+                        "%llX",
+                        static_cast<unsigned long long>(
+                            static_cast<Adesk::UInt64>(objectId.handle())));
+                    handles.push_back(text);
+                }
+            }
+            acedSSFree(selectionSet);
+        }
+        return handles;
+    }
+
     class SelectionEventReactor : public AcEditorReactor
     {
     public:
@@ -57,56 +114,15 @@ namespace
 
             s_inReactor = true;
 
-            std::vector<std::string> handles;
-            ads_name selectionSet;
-            acdbNameClear(selectionSet);
-
-            if (acedSSGet(ACRX_T("I"), nullptr, nullptr, nullptr, selectionSet) == RTNORM)
+            try
             {
-                Adesk::Int32 count = 0;
-                if (acedSSLength(selectionSet, &count) == RTNORM)
-                {
-                    handles.reserve(static_cast<size_t>(count));
-                    for (Adesk::Int32 i = 0; i < count; ++i)
-                    {
-                        ads_name entityName;
-                        acdbNameClear(entityName);
-                        if (acedSSName(selectionSet, i, entityName) != RTNORM)
-                        {
-                            continue;
-                        }
+                std::vector<std::string> handles = collectImpliedSelectionHandles();
+                updateSelectionCache(handles);
 
-                        AcDbObjectId objectId;
-                        if (acdbGetObjectId(objectId, entityName) != Acad::eOk)
-                        {
-                            continue;
-                        }
-
-                        char text[32] = {};
-                        std::sprintf(
-                            text,
-                            "%llX",
-                            static_cast<unsigned long long>(
-                                static_cast<Adesk::UInt64>(objectId.handle())));
-                        handles.push_back(text);
-                    }
-                }
-                acedSSFree(selectionSet);
+                js_engine::emitSelectionEvent(handles);
             }
-
-            const js_engine::EvalResult result = js_engine::emitSelectionEvent(handles);
-            if (result.ok)
+            catch (...)
             {
-                if (!result.text.empty())
-                {
-                    const std::basic_string<ACHAR> output = command_text::fromUtf8(result.text);
-                    acutPrintf(ACRX_T("\nresult: %s"), output.c_str());
-                }
-            }
-            else
-            {
-                const std::basic_string<ACHAR> output = command_text::fromUtf8(result.text);
-                acutPrintf(ACRX_T("\nselect.event error: %s"), output.c_str());
             }
 
             s_inReactor = false;
@@ -135,6 +151,17 @@ namespace selection_event
             delete g_reactor;
             g_reactor = nullptr;
         }
+    }
+
+    uint64_t getSelectionVersion()
+    {
+        return g_selectionVersion.load();
+    }
+
+    std::vector<std::string> getSelectedHandles()
+    {
+        std::lock_guard<std::mutex> lock(g_selectionMutex);
+        return g_selectedHandles;
     }
 }
 

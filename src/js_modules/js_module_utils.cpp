@@ -8,7 +8,7 @@ namespace js_modules
 {
     namespace
     {
-        const int kMaxInspectDepth = 4;
+        const int kMaxInspectDepth = 20;
         const size_t kMaxInlineInspectLength = 80;
 
         std::string indent(int depth)
@@ -210,7 +210,7 @@ namespace js_modules
                 return result;
             }
 
-            std::string compact("[ ");
+            std::string compact("[");
             bool canUseCompact = true;
             for (uint32_t i = 0; i < length; ++i)
             {
@@ -230,7 +230,7 @@ namespace js_modules
                     compact += ", ";
                 }
             }
-            compact += " ]";
+            compact += "]";
 
             if (canUseCompact && compact.size() <= kMaxInlineInspectLength)
             {
@@ -296,8 +296,41 @@ namespace js_modules
                 return result;
             }
 
+            bool hasNestedComplex = false;
+            for (uint32_t i = 0; i < propertyCount; ++i)
+            {
+                JSValue pv = JS_GetProperty(context, value, properties[i].atom);
+                if (JS_IsObject(pv))
+                {
+                    if (JS_IsArray(pv))
+                    {
+                        uint32_t len = arrayLength(context, pv);
+                        for (uint32_t j = 0; j < len; ++j)
+                        {
+                            JSValue elem = JS_GetPropertyUint32(context, pv, j);
+                            if (JS_IsObject(elem))
+                            {
+                                hasNestedComplex = true;
+                                JS_FreeValue(context, elem);
+                                break;
+                            }
+                            JS_FreeValue(context, elem);
+                        }
+                    }
+                    else
+                    {
+                        hasNestedComplex = true;
+                    }
+                }
+                JS_FreeValue(context, pv);
+                if (hasNestedComplex)
+                {
+                    break;
+                }
+            }
+
             std::string compact("{ ");
-            bool canUseCompact = true;
+            bool canUseCompact = !hasNestedComplex;
             for (uint32_t i = 0; i < propertyCount; ++i)
             {
                 JSValue keyValue = JS_AtomToString(context, properties[i].atom);
@@ -862,7 +895,7 @@ namespace js_modules
                 return JS_EXCEPTION;
             }
 
-            int32_t precision = 0;
+            int32_t precision = getGlobalRoundDigits(context, 3);
             if (argc >= 2 && !JS_IsUndefined(argv[1]))
             {
                 if (JS_ToInt32(context, &precision, argv[1]) < 0)
@@ -955,7 +988,10 @@ namespace js_modules
         JS_SetPropertyStr(context, global, "clone", JS_NewCFunction(context, _jsClone, "clone", 1));
         JS_SetPropertyStr(context, global, "merge", JS_NewCFunction(context, _jsMerge, "merge", 2));
         JS_SetPropertyStr(context, global, "inspect", JS_NewCFunction(context, _jsInspect, "inspect", 2));
-        JS_SetPropertyStr(context, global, "round", JS_NewCFunction(context, _jsRound, "round", 3));
+        JSValue roundFn = JS_NewCFunction(context, _jsRound, "round", 3);
+        JS_SetPropertyStr(context, roundFn, "digits", JS_UNDEFINED);
+        JS_SetPropertyStr(context, global, "round", roundFn);
+        JS_SetPropertyStr(context, global, "ROUND", JS_UNDEFINED);
         
         JS_FreeValue(context, global);
     }
@@ -999,5 +1035,74 @@ namespace js_modules
 
         error = "expected Uint8Array, ArrayBuffer, or byte array";
         return false;
+    }
+
+    int getGlobalRoundDigits(JSContext *context, int defaultDigits)
+    {
+        if (context == nullptr)
+        {
+            return defaultDigits;
+        }
+
+        JSValue global = JS_GetGlobalObject(context);
+
+        auto tryGetDigit = [&](const char *prop) -> int {
+            JSValue v = JS_GetPropertyStr(context, global, prop);
+            if (JS_IsNumber(v))
+            {
+                int32_t d = 0;
+                if (JS_ToInt32(context, &d, v) == 0 && d >= -308 && d <= 308)
+                {
+                    JS_FreeValue(context, v);
+                    return d;
+                }
+            }
+            else if (JS_IsFunction(context, v) || JS_IsObject(v))
+            {
+                JSValue sub = JS_GetPropertyStr(context, v, "digits");
+                if (JS_IsNumber(sub))
+                {
+                    int32_t d = 0;
+                    if (JS_ToInt32(context, &d, sub) == 0 && d >= -308 && d <= 308)
+                    {
+                        JS_FreeValue(context, sub);
+                        JS_FreeValue(context, v);
+                        return d;
+                    }
+                }
+                JS_FreeValue(context, sub);
+            }
+            JS_FreeValue(context, v);
+            return -999999;
+        };
+
+        const char *props[] = { "round", "ROUND", "round_digits", "ROUND_DIGITS", "digits", "precision" };
+        for (const char *p : props)
+        {
+            int d = tryGetDigit(p);
+            if (d != -999999)
+            {
+                JS_FreeValue(context, global);
+                return d;
+            }
+        }
+
+        JS_FreeValue(context, global);
+        return defaultDigits;
+    }
+
+    double roundToPrecision(double value, int digits)
+    {
+        if (!std::isfinite(value))
+        {
+            return value;
+        }
+        const double factor = std::pow(10.0, static_cast<double>(digits));
+        if (!std::isfinite(factor) || factor == 0.0)
+        {
+            return value;
+        }
+        const double eps = (value >= 0.0) ? 1e-15 : -1e-15;
+        return std::round((value + eps) * factor) / factor;
     }
 }

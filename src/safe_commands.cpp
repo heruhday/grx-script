@@ -1,6 +1,7 @@
 #include "safe_commands.h"
 #include "query_dsl/query_dsl.h"
 #include "safe_transaction.h"
+#include "selection_event.h"
 #include "text_util.h"
 #include "js_modules/js_modules.h"
 #include "js_modules/js_module_utils.h"
@@ -11,6 +12,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <map>
 #include <string>
 #include <vector>
 #include <set>
@@ -2861,6 +2863,132 @@ namespace safe_commands
         return JS_NewString(context, jsCode.c_str());
     }
 
+    JSValue jsQtoPoll(JSContext *context, JSValueConst, int argc, JSValueConst *argv)
+    {
+        AcApDocument *pDoc = acDocManager ? acDocManager->curDocument() : nullptr;
+        std::string dwgName = "Untitled.dwg";
+        if (pDoc != nullptr && pDoc->docTitle() != nullptr)
+        {
+            dwgName = command_text::toUtf8(pDoc->docTitle());
+        }
+
+#if defined(_GCRXAPP) || defined(GSTARCAD_VERSION)
+        const char *platformStr = "GstarCAD";
+#else
+        const char *platformStr = "AutoCAD";
+#endif
+
+        const std::vector<std::string> handles = selection_event::getSelectedHandles();
+        const uint64_t ver = selection_event::getSelectionVersion();
+
+        int64_t clientVer = -1;
+        if (argc >= 1 && JS_IsNumber(argv[0]))
+        {
+            JS_ToInt64(context, &clientVer, argv[0]);
+        }
+
+        JSValue outObj = JS_NewObject(context);
+        JS_SetPropertyStr(context, outObj, "version", JS_NewInt64(context, static_cast<int64_t>(ver)));
+        JS_SetPropertyStr(context, outObj, "dwg", JS_NewString(context, dwgName.c_str()));
+        JS_SetPropertyStr(context, outObj, "platform", JS_NewString(context, platformStr));
+        JS_SetPropertyStr(context, outObj, "count", JS_NewInt32(context, static_cast<int32_t>(handles.size())));
+
+        if (clientVer > 0 && static_cast<uint64_t>(clientVer) == ver)
+        {
+            JS_SetPropertyStr(context, outObj, "changed", JS_NewBool(context, false));
+            return outObj;
+        }
+
+        JS_SetPropertyStr(context, outObj, "changed", JS_NewBool(context, true));
+
+        JSValue handlesArr = JS_NewArray(context);
+        JSValue entitiesArr = JS_NewArray(context);
+        uint32_t entIdx = 0;
+
+        for (size_t i = 0; i < handles.size(); ++i)
+        {
+            JS_SetPropertyUint32(context, handlesArr, static_cast<uint32_t>(i), JS_NewString(context, handles[i].c_str()));
+            JSValue entObj = callEntityGet(context, handles[i]);
+            if (!JS_IsException(entObj) && !JS_IsNull(entObj) && !JS_IsUndefined(entObj))
+            {
+                JS_SetPropertyUint32(context, entitiesArr, entIdx++, entObj);
+            }
+            else
+            {
+                JS_FreeValue(context, entObj);
+            }
+        }
+
+        JS_SetPropertyStr(context, outObj, "handles", handlesArr);
+        JS_SetPropertyStr(context, outObj, "entities", entitiesArr);
+
+        // Collect layers from LayerTable (lightweight, safe from any context)
+        JSValue layersArr = JS_NewArray(context);
+        if (pDoc != nullptr && pDoc->database() != nullptr)
+        {
+            AcDbLayerTable *pLayerTable = nullptr;
+            if (pDoc->database()->getLayerTable(pLayerTable, AcDb::kForRead) == Acad::eOk && pLayerTable != nullptr)
+            {
+                AcDbLayerTableIterator *pLyrIter = nullptr;
+                if (pLayerTable->newIterator(pLyrIter) == Acad::eOk && pLyrIter != nullptr)
+                {
+                    uint32_t lyrIdx = 0;
+                    for (; !pLyrIter->done(); pLyrIter->step())
+                    {
+                        AcDbLayerTableRecord *pRecord = nullptr;
+                        if (pLyrIter->getRecord(pRecord, AcDb::kForRead) == Acad::eOk && pRecord != nullptr)
+                        {
+                            ACHAR *name = nullptr;
+                            if (pRecord->getName(name) == Acad::eOk && name != nullptr)
+                            {
+                                JSValue item = JS_NewObject(context);
+                                JS_SetPropertyStr(context, item, "layer", JS_NewString(context, command_text::toUtf8(name).c_str()));
+                                JS_SetPropertyStr(context, item, "count", JS_NewInt32(context, 0));
+                                JS_SetPropertyUint32(context, layersArr, lyrIdx++, item);
+                                acutDelString(name);
+                            }
+                            pRecord->close();
+                        }
+                    }
+                    delete pLyrIter;
+                }
+                pLayerTable->close();
+            }
+        }
+        JS_SetPropertyStr(context, outObj, "layers", layersArr);
+
+        return outObj;
+    }
+
+    JSValue jsQtoSelectHandles(JSContext *context, JSValueConst, int argc, JSValueConst *argv)
+    {
+        if (argc < 1 || !JS_IsArray(argv[0]))
+        {
+            return JS_ThrowTypeError(context, "qtoSelectHandles expects an array of handles");
+        }
+
+        JSValue lenVal = JS_GetPropertyStr(context, argv[0], "length");
+        int64_t len = 0;
+        JS_ToInt64(context, &len, lenVal);
+        JS_FreeValue(context, lenVal);
+
+        std::vector<AcDbObjectId> ids;
+        for (int64_t i = 0; i < len; ++i)
+        {
+            JSValue elem = JS_GetPropertyUint32(context, argv[0], static_cast<uint32_t>(i));
+            AcDbObjectId objId;
+            if (objectIdFromHandleValue(objId, context, elem) == Acad::eOk && objId.isValid() && !objId.isErased())
+            {
+                ids.push_back(objId);
+            }
+            JS_FreeValue(context, elem);
+        }
+
+        safe_tx::applyImpliedSelection(ids);
+
+        return jsQtoPoll(context, JS_UNDEFINED, 0, nullptr);
+    }
+
     void registerSafeCommands(JSContext *context, JSValue targetObj, bool isEntityModule)
     {
         JS_SetPropertyStr(context, targetObj, "ssSet", JS_NewCFunction(context, jsSafeSsSet, "ssSet", 1));
@@ -2870,6 +2998,8 @@ namespace safe_commands
         JS_SetPropertyStr(context, targetObj, "ssGet", JS_NewCFunction(context, jsSafeSsGet, "ssGet", 1));
         JS_SetPropertyStr(context, targetObj, "ssQuery", JS_NewCFunction(context, jsSafeSsQuery, "ssQuery", 1));
         JS_SetPropertyStr(context, targetObj, "eShow", JS_NewCFunction(context, jsSafeEShow, "eShow", 1));
+        JS_SetPropertyStr(context, targetObj, "qtoPoll", JS_NewCFunction(context, jsQtoPoll, "qtoPoll", 1));
+        JS_SetPropertyStr(context, targetObj, "qtoSelectHandles", JS_NewCFunction(context, jsQtoSelectHandles, "qtoSelectHandles", 2));
 
         if (isEntityModule)
         {
@@ -3817,7 +3947,36 @@ namespace safe_commands
                 "  const handles = " + handlesJson + ";\n"
                 "  const rawEntries = handles.map(h => entity.get(h)).filter(e => e !== null);\n"
                 "  const entries = expandEntities(rawEntries);\n"
-                "  return fn(entries);\n"
+                "  const _res = fn(entries);\n"
+                "  const _getDigits = () => {\n"
+                "    if (typeof globalThis.ROUND === 'number' && Number.isFinite(globalThis.ROUND)) return Math.floor(globalThis.ROUND);\n"
+                "    if (typeof globalThis.round === 'number' && Number.isFinite(globalThis.round)) return Math.floor(globalThis.round);\n"
+                "    if (typeof globalThis.ROUND_DIGITS === 'number' && Number.isFinite(globalThis.ROUND_DIGITS)) return Math.floor(globalThis.ROUND_DIGITS);\n"
+                "    if (typeof globalThis.round_digits === 'number' && Number.isFinite(globalThis.round_digits)) return Math.floor(globalThis.round_digits);\n"
+                "    if (typeof globalThis.round === 'function' && typeof globalThis.round.digits === 'number' && Number.isFinite(globalThis.round.digits)) return Math.floor(globalThis.round.digits);\n"
+                "    if (typeof globalThis.digits === 'number' && Number.isFinite(globalThis.digits)) return Math.floor(globalThis.digits);\n"
+                "    if (typeof globalThis.precision === 'number' && Number.isFinite(globalThis.precision)) return Math.floor(globalThis.precision);\n"
+                "    return undefined;\n"
+                "  };\n"
+                "  const _roundValue = (val, d) => {\n"
+                "    if (d === undefined || d === null) return val;\n"
+                "    if (typeof val === 'number') {\n"
+                "      if (!Number.isFinite(val)) return val;\n"
+                "      if (typeof globalThis.round === 'function') {\n"
+                "        try { return globalThis.round(val, d); } catch {}\n"
+                "      }\n"
+                "      const factor = Math.pow(10, d);\n"
+                "      return Math.round((val + Number.EPSILON) * factor) / factor;\n"
+                "    }\n"
+                "    if (Array.isArray(val)) return val.map(x => _roundValue(x, d));\n"
+                "    if (val !== null && typeof val === 'object') {\n"
+                "      const out = Object.create(Object.getPrototypeOf(val));\n"
+                "      for (const k of Object.keys(val)) out[k] = _roundValue(val[k], d);\n"
+                "      return out;\n"
+                "    }\n"
+                "    return val;\n"
+                "  };\n"
+                "  return _roundValue(_res, _getDigits());\n"
                 "})();";
 
             const js_engine::EvalResult result = js_engine::evalForRepl(code);

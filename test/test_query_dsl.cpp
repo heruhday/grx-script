@@ -929,7 +929,7 @@ int main()
         // Prefix where:
         const std::string dsl1 = "where e.lyr == 'WALL': {e.code: [+=e.a, +=e.l]}";
         assert(query_dsl::isDslQuery(dsl1));
-        std::string jsCode1 = query_dsl::compileToJsCode(dsl1, "entries");
+        std::string jsCode1 = "(() => {\n" + query_dsl::compileToJsCode(dsl1, "entries") + "\nglobalThis.result = result;\n})();";
 
         evalJs(ctx, "entries = [\n"
                     "  { code: 'W1', lyr: 'WALL', a: 100, l: 10 },\n"
@@ -943,7 +943,7 @@ int main()
         // Query header options:
         const std::string dsl2 = "Query <({ where: e.a > 150 })>: {e.code: [+=e.a, +=e.l]}";
         assert(query_dsl::isDslQuery(dsl2));
-        std::string jsCode2 = query_dsl::compileToJsCode(dsl2, "entries");
+        std::string jsCode2 = "(() => {\n" + query_dsl::compileToJsCode(dsl2, "entries") + "\nglobalThis.result = result;\n})();";
 
         evalJs(ctx, jsCode2);
         assert(JS_IsUndefined(evalJs(ctx, "result.W1")));
@@ -1014,7 +1014,7 @@ int main()
         // 1. Bare `+=a`:
         const std::string dsl1 = "+=a";
         assert(query_dsl::isDslQuery(dsl1));
-        std::string jsCode1 = query_dsl::compileToJsCode(dsl1, "entries");
+        std::string jsCode1 = "(() => {\n" + query_dsl::compileToJsCode(dsl1, "entries") + "\nglobalThis.result = result;\n})();";
         std::cout << "--- Generated JS for '+=a' ---:\n" << jsCode1 << "\n" << std::endl;
 
         evalJs(ctx, "entries = [\n"
@@ -1034,7 +1034,7 @@ int main()
         evalJs(ctx, "entries = [{ a: 100, l: 20 }, { a: 250, l: 30 }, { l: 50 }];");
         const std::string dsl2 = "++";
         assert(query_dsl::isDslQuery(dsl2));
-        std::string jsCode2 = query_dsl::compileToJsCode(dsl2, "entries");
+        std::string jsCode2 = "(() => {\n" + query_dsl::compileToJsCode(dsl2, "entries") + "\nglobalThis.result = result;\n})();";
         evalJs(ctx, jsCode2);
         double res2 = 0;
         JS_ToFloat64(ctx, &res2, evalJs(ctx, "result"));
@@ -1046,7 +1046,7 @@ int main()
         evalJs(ctx, "entries = [{ a: 100, l: 20 }, { a: 250, l: 30 }, { l: 50 }];");
         const std::string dsl3 = "+=a/1e6 where a";
         assert(query_dsl::isDslQuery(dsl3));
-        std::string jsCode3 = query_dsl::compileToJsCode(dsl3, "entries");
+        std::string jsCode3 = "(() => {\n" + query_dsl::compileToJsCode(dsl3, "entries") + "\nglobalThis.result = result;\n})();";
         std::cout << "--- Generated JS for '+=a/1e6 where a' ---:\n" << jsCode3 << "\n" << std::endl;
         evalJs(ctx, jsCode3);
         double res3 = 0;
@@ -1505,6 +1505,115 @@ int main()
 
         JS_FreeContext(ctx);
         std::cout << "  Universal color parsing (HSL, HSV, CMYK, HCT, RGB, Hex, ACI) verified successfully!" << std::endl;
+    }
+
+    // -------------------------------------------------------------
+    // Test 32: Flat Object Selection Query: {a: += a/1e6, l: += l/1e6}
+    // -------------------------------------------------------------
+    {
+        std::cout << "\n[Test 32] Flat Object Selection Query {a: += a/1e6, l: += l/1e6}..." << std::endl;
+        JSContext *ctx = JS_NewContext(rt);
+
+        const std::string dsl1 = "{a: += a/1e6, l: += l/1e6}";
+        assert(query_dsl::isDslQuery(dsl1));
+        std::string jsCode1 = "(() => {\n" + query_dsl::compileToJsCode(dsl1, "entries") + "\nglobalThis.result = result;\n})();";
+
+        evalJs(ctx, "entries = [\n"
+                    "  { a: 2000000, l: 3000000 },\n"
+                    "  { a: 500000, l: 1500000 }\n"
+                    "];");
+
+        evalJs(ctx, jsCode1);
+        JSValue res1 = evalJs(ctx, "result");
+        double a1 = getPropNumber(ctx, res1, "a");
+        double l1 = getPropNumber(ctx, res1, "l");
+        std::cout << "  Flat Object Result: a=" << a1 << " (exp 2.5), l=" << l1 << " (exp 4.5)" << std::endl;
+        assert(a1 == 2.5);
+        assert(l1 == 4.5);
+
+        const std::string dsl2 = "{a: += e.a/1e6, l: += e.l/1e6}";
+        assert(query_dsl::isDslQuery(dsl2));
+        std::string jsCode2 = "(() => {\n" + query_dsl::compileToJsCode(dsl2, "entries") + "\nglobalThis.result = result;\n})();";
+        evalJs(ctx, jsCode2);
+        JSValue res2 = evalJs(ctx, "result");
+        double a2 = getPropNumber(ctx, res2, "a");
+        double l2 = getPropNumber(ctx, res2, "l");
+        assert(a2 == 2.5);
+        assert(l2 == 4.5);
+
+        const std::string dsl3 = "{where: e.l > 2000000, a: += a/1e6, l: += l/1e6}";
+        assert(query_dsl::isDslQuery(dsl3));
+        std::string jsCode3 = "(() => {\n" + query_dsl::compileToJsCode(dsl3, "entries") + "\nglobalThis.result = result;\n})();";
+        evalJs(ctx, jsCode3);
+        JSValue res3 = evalJs(ctx, "result");
+        double a3 = getPropNumber(ctx, res3, "a");
+        double l3 = getPropNumber(ctx, res3, "l");
+        assert(a3 == 2.0);
+        assert(l3 == 3.0);
+
+        JS_FreeContext(ctx);
+        std::cout << "  Flat object selection verified successfully!" << std::endl;
+    }
+
+    // -------------------------------------------------------------
+    // Test 33: Global round variable rounding in SS-QUERY DSL
+    // -------------------------------------------------------------
+    {
+        std::cout << "\n[Test 33] Global round variable rounding in SS-QUERY DSL..." << std::endl;
+        JSContext *ctx = JS_NewContext(rt);
+
+        evalJs(ctx, "entries = [\n"
+                    "  { a: 1234567, l: 3333333 },\n"
+                    "  { a: 7654321, l: 4444444 }\n"
+                    "];");
+
+        const std::string dsl = "{a: += a/1e6, l: += l/1e6}";
+
+        // 1. Without round set (unrounded)
+        std::string jsCodeNoRound = "(() => {\n" + query_dsl::compileToJsCode(dsl, "entries") + "\nglobalThis.result = result;\n})();";
+        evalJs(ctx, jsCodeNoRound);
+        JSValue rNoRound = evalJs(ctx, "result");
+        double aNoRound = getPropNumber(ctx, rNoRound, "a");
+        std::cout << "  Unrounded a=" << aNoRound << std::endl;
+        assert(aNoRound > 8.8888 && aNoRound < 8.8889);
+
+        // 2. With globalThis.ROUND = 2
+        evalJs(ctx, "globalThis.ROUND = 2;");
+        std::string jsCodeRound2 = "(() => {\n" + query_dsl::compileToJsCode(dsl, "entries") + "\nglobalThis.result = result;\n})();";
+        evalJs(ctx, jsCodeRound2);
+        JSValue rRound2 = evalJs(ctx, "result");
+        double aRound2 = getPropNumber(ctx, rRound2, "a");
+        double lRound2 = getPropNumber(ctx, rRound2, "l");
+        std::cout << "  ROUND=2: a=" << aRound2 << " (exp 8.89), l=" << lRound2 << " (exp 7.78)" << std::endl;
+        assert(aRound2 == 8.89);
+        assert(lRound2 == 7.78);
+
+        // 3. With globalThis.round = 3
+        evalJs(ctx, "globalThis.ROUND = undefined; globalThis.round = 3;");
+        std::string jsCodeRound3 = "(() => {\n" + query_dsl::compileToJsCode(dsl, "entries") + "\nglobalThis.result = result;\n})();";
+        evalJs(ctx, jsCodeRound3);
+        JSValue rRound3 = evalJs(ctx, "result");
+        double aRound3 = getPropNumber(ctx, rRound3, "a");
+        double lRound3 = getPropNumber(ctx, rRound3, "l");
+        std::cout << "  round=3: a=" << aRound3 << " (exp 8.889), l=" << lRound3 << " (exp 7.778)" << std::endl;
+        assert(aRound3 == 8.889);
+        assert(lRound3 == 7.778);
+
+        // 4. With globalThis.round = 0 (integer rounding)
+        evalJs(ctx, "globalThis.round = 0;");
+        std::string jsCodeRound0 = "(() => {\n" + query_dsl::compileToJsCode(dsl, "entries") + "\nglobalThis.result = result;\n})();";
+        evalJs(ctx, jsCodeRound0);
+        JSValue rRound0 = evalJs(ctx, "result");
+        double aRound0 = getPropNumber(ctx, rRound0, "a");
+        double lRound0 = getPropNumber(ctx, rRound0, "l");
+        std::cout << "  round=0: a=" << aRound0 << " (exp 9), l=" << lRound0 << " (exp 8)" << std::endl;
+        assert(aRound0 == 9.0);
+        assert(lRound0 == 8.0);
+
+        // Clean up
+        evalJs(ctx, "globalThis.ROUND = undefined; globalThis.round = undefined;");
+        JS_FreeContext(ctx);
+        std::cout << "  Global round variable rounding verified successfully!" << std::endl;
     }
 
     JS_FreeRuntime(rt);

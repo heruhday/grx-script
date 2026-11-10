@@ -80,22 +80,24 @@ else()
   set(AUTOCAD_SDK_DIR_2024 "C:/Autodesk/ObjectARX_for_AutoCAD_2024_Win_64bit_dlm")
 
   # Select SDK root based on version unless explicitly customized via -DOBJECTARX_SDK_ROOT
-  if(NOT OBJECTARX_SDK_ROOT OR OBJECTARX_SDK_ROOT STREQUAL AUTOCAD_SDK_DIR_2021 OR OBJECTARX_SDK_ROOT_AUTO)
-    if(DEFINED AUTOCAD_SDK_DIR_${AUTOCAD_VERSION} AND EXISTS "${AUTOCAD_SDK_DIR_${AUTOCAD_VERSION}}")
-      set(OBJECTARX_SDK_ROOT "${AUTOCAD_SDK_DIR_${AUTOCAD_VERSION}}" CACHE PATH "AutoCAD ObjectARX SDK root" FORCE)
-      set(OBJECTARX_SDK_ROOT_AUTO TRUE CACHE INTERNAL "SDK root was automatically selected")
-    endif()
+  if(DEFINED AUTOCAD_SDK_DIR_${AUTOCAD_VERSION})
+    set(_DEFAULT_AUTOCAD_SDK "${AUTOCAD_SDK_DIR_${AUTOCAD_VERSION}}")
+  else()
+    set(_DEFAULT_AUTOCAD_SDK "${AUTOCAD_SDK_DIR_2021}")
   endif()
 
-  set(OBJECTARX_SDK_ROOT "${AUTOCAD_SDK_DIR_2021}" CACHE PATH "AutoCAD ObjectARX SDK root")
-
-  # Infer AUTOCAD_VERSION if OBJECTARX_SDK_ROOT was manually set
-  foreach(_ver 2017 2018 2019 2020 2021 2022 2023 2024)
-    if(OBJECTARX_SDK_ROOT MATCHES "${_ver}")
-      set(AUTOCAD_VERSION "${_ver}" CACHE STRING "Target AutoCAD version (2017..2024)" FORCE)
-      break()
-    endif()
-  endforeach()
+  if(NOT OBJECTARX_SDK_ROOT OR OBJECTARX_SDK_ROOT_AUTO)
+    set(OBJECTARX_SDK_ROOT "${_DEFAULT_AUTOCAD_SDK}" CACHE PATH "AutoCAD ObjectARX SDK root" FORCE)
+    set(OBJECTARX_SDK_ROOT_AUTO TRUE CACHE INTERNAL "SDK root was automatically selected")
+  else()
+    # Infer AUTOCAD_VERSION if OBJECTARX_SDK_ROOT was manually specified
+    foreach(_ver 2017 2018 2019 2020 2021 2022 2023 2024)
+      if(OBJECTARX_SDK_ROOT MATCHES "${_ver}")
+        set(AUTOCAD_VERSION "${_ver}" CACHE STRING "Target AutoCAD version (2017..2024)" FORCE)
+        break()
+      endif()
+    endforeach()
+  endif()
 
   message(STATUS ">>> Targeting AutoCAD ${AUTOCAD_VERSION} (SDK: ${OBJECTARX_SDK_ROOT})")
 
@@ -109,7 +111,7 @@ else()
       "${OBJECTARX_LIB_DIR}"
       "${OBJECTARX_MODULE_DEF}")
     if(NOT EXISTS "${REQUIRED_PATH}")
-      message(FATAL_ERROR "Required ObjectARX SDK path not found: ${REQUIRED_PATH}")
+      message(FATAL_ERROR "Required ObjectARX SDK path not found for AutoCAD ${AUTOCAD_VERSION}: ${REQUIRED_PATH}")
     endif()
   endforeach()
 

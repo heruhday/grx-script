@@ -309,6 +309,25 @@
 
 (defun c:rl () (c:reload))
 
-(princ "\n[arx01] AutoLISP ready: (js-eval ...) returns JSON, (js-execute ...) no return. Type RELOAD or RL to hot-reload.\n")
+;;; --------------------------------------------------------------------------
+;;;  AutoCAD / GstarCAD Command: QTO / QPROPS / XPROPS
+;;;  Ensures arx01 binary is loaded and opens QTO Property Box (Tauri)
+;;; --------------------------------------------------------------------------
+(defun js-open-qto ()
+  (if (js-ensure-arx)
+    (vl-cmdf "_.QTO")
+  )
+  (princ)
+)
+
+(if (not (js-is-arx-loaded))
+  (progn
+    (defun c:qto () (js-open-qto))
+    (defun c:qprops () (js-open-qto))
+    (defun c:xprops () (js-open-qto))
+  )
+)
+
+(princ "\n[arx01] AutoLISP ready: (js-eval ...) returns JSON, (js-execute ...) no return, QTO/QPROPS opens QTO Property Box. Type RELOAD or RL to hot-reload.\n")
 (princ)
 

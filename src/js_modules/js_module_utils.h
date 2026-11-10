@@ -29,4 +29,6 @@ namespace js_modules
     JSValue deepCopyValue(JSContext *context, JSValueConst value);
     JSValue deepMergeObjects(JSContext *context, JSValueConst source, JSValueConst destination);
     bool bytesFromJs(JSContext *context, JSValueConst value, std::vector<uint8_t> &bytes, std::string &error);
+    int getGlobalRoundDigits(JSContext *context, int defaultDigits = 3);
+    double roundToPrecision(double value, int digits);
 }

@@ -543,69 +543,159 @@ namespace query_dsl
                     }
                     else if (peek() == '{')
                     {
-                        consume('{');
-                        skipWhitespaceAndComments();
-
-                        std::string rootKey = readJsExpression(":");
-                        consume(':');
-                        skipWhitespaceAndComments();
-
-                        // Check if root entry is a where block: {where: <expr>, ...}
-                        if (rootKey == "where" && res.whereExpr.empty())
+                        bool isFlatObjectSelection = false;
+                        size_t savedPos = m_pos;
+                        try
                         {
-                            res.whereExpr = rewriteEntityExpression(trim(readJsExpression(",")));
-                            consume(',');
+                            consume('{');
                             skipWhitespaceAndComments();
-                            rootKey = readJsExpression(":");
+
+                            std::string firstKey = readJsExpression(":");
                             consume(':');
                             skipWhitespaceAndComments();
-                        }
 
-                        if (peek() == '[')
-                        {
-                            auto arrSel = parseArraySelectionBlock("");
-                            auto rootGroup = std::make_shared<DslNode>();
-                            rootGroup->type = DslNodeType::Group;
-                            rootGroup->keyExpr = rootKey;
-                            rootGroup->children.push_back(arrSel);
-                            res.rootNode = rootGroup;
+                            if (firstKey == "where")
+                            {
+                                readJsExpression(",");
+                                consume(',');
+                                skipWhitespaceAndComments();
+                                firstKey = readJsExpression(":");
+                                consume(':');
+                                skipWhitespaceAndComments();
+                            }
+
+                            char afterColon = peek();
+                            if (afterColon != '{' && afterColon != '[' && !hasEntityReference(firstKey))
+                            {
+                                isFlatObjectSelection = true;
+                            }
                         }
-                        else if (peek() == '{' && isSelectionAhead() && !hasEntityReference(rootKey))
+                        catch (...)
                         {
-                            auto rootSel = parseSelectionBlock(rootKey);
-                            auto rootGroup = std::make_shared<DslNode>();
-                            rootGroup->type = DslNodeType::Group;
-                            rootGroup->keyExpr = "e.code";
-                            rootGroup->children.push_back(rootSel);
-                            res.rootNode = rootGroup;
+                            isFlatObjectSelection = false;
                         }
-                        else if (peek() == '{')
+                        m_pos = savedPos; // rewind to '{'
+
+                        if (isFlatObjectSelection)
                         {
-                            res.rootNode = parseGroupBlock(rootKey);
+                            consume('{');
+                            skipWhitespaceAndComments();
+
+                            // Check if first entry is where: <expr>
+                            size_t checkPos = m_pos;
+                            std::string potentialKey = trim(readJsExpression(":"));
+                            if (potentialKey == "where")
+                            {
+                                consume(':');
+                                skipWhitespaceAndComments();
+                                std::string w = rewriteEntityExpression(trim(readJsExpression(",")));
+                                consume(',');
+                                skipWhitespaceAndComments();
+                                if (!res.whereExpr.empty())
+                                {
+                                    res.whereExpr = "(" + res.whereExpr + ") && (" + w + ")";
+                                }
+                                else
+                                {
+                                    res.whereExpr = w;
+                                }
+                            }
+                            else
+                            {
+                                m_pos = checkPos; // rewind to field
+                            }
+
+                            auto sel = std::make_shared<DslNode>();
+                            sel->type = DslNodeType::Selection;
+                            sel->subtotalField = "";
+
+                            while (peek() != '}' && peek() != '\0')
+                            {
+                                std::string fieldName = trim(readJsExpression(":"));
+                                consume(':');
+                                skipWhitespaceAndComments();
+
+                                sel->aggregations.push_back(parseAggregationField(fieldName));
+
+                                skipWhitespaceAndComments();
+                                if (peek() == ',')
+                                {
+                                    consume(',');
+                                }
+                                else if (peek() == '}')
+                                {
+                                    break;
+                                }
+                            }
+                            consume('}');
+                            res.rootNode = sel;
                         }
                         else
                         {
-                            // Direct scalar aggregation for group, e.g. {e.code: += 1} or {e.code: +=e.a}
-                            AggregationField agg = parseAggregationField("");
-                            auto scalarSel = std::make_shared<DslNode>();
-                            scalarSel->type = DslNodeType::ScalarSelection;
-                            scalarSel->aggregations.push_back(agg);
+                            consume('{');
+                            skipWhitespaceAndComments();
 
-                            auto rootGroup = std::make_shared<DslNode>();
-                            rootGroup->type = DslNodeType::Group;
-                            rootGroup->keyExpr = rootKey;
-                            rootGroup->children.push_back(scalarSel);
-                            res.rootNode = rootGroup;
-                        }
+                            std::string rootKey = readJsExpression(":");
+                            consume(':');
+                            skipWhitespaceAndComments();
 
-                        skipWhitespaceAndComments();
-                        if (peek() == ',')
-                        {
-                            consume(',');
-                        }
-                        if (peek() == '}')
-                        {
-                            consume('}');
+                            // Check if root entry is a where block: {where: <expr>, ...}
+                            if (rootKey == "where" && res.whereExpr.empty())
+                            {
+                                res.whereExpr = rewriteEntityExpression(trim(readJsExpression(",")));
+                                consume(',');
+                                skipWhitespaceAndComments();
+                                rootKey = readJsExpression(":");
+                                consume(':');
+                                skipWhitespaceAndComments();
+                            }
+
+                            if (peek() == '[')
+                            {
+                                auto arrSel = parseArraySelectionBlock("");
+                                auto rootGroup = std::make_shared<DslNode>();
+                                rootGroup->type = DslNodeType::Group;
+                                rootGroup->keyExpr = rootKey;
+                                rootGroup->children.push_back(arrSel);
+                                res.rootNode = rootGroup;
+                            }
+                            else if (peek() == '{' && isSelectionAhead() && !hasEntityReference(rootKey))
+                            {
+                                auto rootSel = parseSelectionBlock(rootKey);
+                                auto rootGroup = std::make_shared<DslNode>();
+                                rootGroup->type = DslNodeType::Group;
+                                rootGroup->keyExpr = "e.code";
+                                rootGroup->children.push_back(rootSel);
+                                res.rootNode = rootGroup;
+                            }
+                            else if (peek() == '{')
+                            {
+                                res.rootNode = parseGroupBlock(rootKey);
+                            }
+                            else
+                            {
+                                // Direct scalar aggregation for group, e.g. {e.code: += 1} or {e.code: +=e.a}
+                                AggregationField agg = parseAggregationField("");
+                                auto scalarSel = std::make_shared<DslNode>();
+                                scalarSel->type = DslNodeType::ScalarSelection;
+                                scalarSel->aggregations.push_back(agg);
+
+                                auto rootGroup = std::make_shared<DslNode>();
+                                rootGroup->type = DslNodeType::Group;
+                                rootGroup->keyExpr = rootKey;
+                                rootGroup->children.push_back(scalarSel);
+                                res.rootNode = rootGroup;
+                            }
+
+                            skipWhitespaceAndComments();
+                            if (peek() == ',')
+                            {
+                                consume(',');
+                            }
+                            if (peek() == '}')
+                            {
+                                consume('}');
+                            }
                         }
                     }
                     else
@@ -1361,7 +1451,7 @@ namespace query_dsl
            << "  const number = Number(value);\n"
            << "  return Number.isFinite(number) ? number : 0;\n"
            << "};\n\n"
-           << "const result = " << entriesVar << ".reduce((acc, e) => {\n";
+           << "const _rawResult = " << entriesVar << ".reduce((acc, e) => {\n";
 
         if (!parsed.whereExpr.empty())
         {
@@ -1421,11 +1511,8 @@ namespace query_dsl
             ss << "\n"
                << "  return acc;\n"
                << "}, " << agg.initValue << ");";
-
-            return ss.str();
         }
-
-        if (parsed.rootNode->type == DslNodeType::ArraySelection)
+        else if (parsed.rootNode->type == DslNodeType::ArraySelection)
         {
             std::string initArr = "[";
             for (size_t i = 0; i < parsed.rootNode->aggregations.size(); ++i)
@@ -1443,16 +1530,75 @@ namespace query_dsl
             ss << "\n"
                << "  return acc;\n"
                << "}, " << initArr << ");";
+        }
+        else if (parsed.rootNode->type == DslNodeType::Selection)
+        {
+            std::vector<AggregationField> staticAggs;
+            for (const auto &agg : parsed.rootNode->aggregations)
+            {
+                if (!hasEntityReference(agg.targetField))
+                {
+                    staticAggs.push_back(agg);
+                }
+            }
 
-            return ss.str();
+            std::string initObj = "Object.create(null)";
+            if (!staticAggs.empty())
+            {
+                initObj = "Object.assign(Object.create(null), { ";
+                for (size_t i = 0; i < staticAggs.size(); ++i)
+                {
+                    if (i > 0) initObj += ", ";
+                    initObj += quoteJsString(staticAggs[i].targetField) + ": " + staticAggs[i].initValue;
+                }
+                initObj += " })";
+            }
+
+            for (const auto &agg : parsed.rootNode->aggregations)
+            {
+                emitAggLine("acc", agg, ss);
+            }
+
+            ss << "\n"
+               << "  return acc;\n"
+               << "}, " << initObj << ");";
+        }
+        else
+        {
+            int varCounter = 0;
+            emitNode(parsed.rootNode, "acc", varCounter, ss);
+
+            ss << "\n"
+               << "  return acc;\n"
+               << "}, Object.create(null));";
         }
 
-        int varCounter = 0;
-        emitNode(parsed.rootNode, "acc", varCounter, ss);
-
-        ss << "\n"
-           << "  return acc;\n"
-           << "}, Object.create(null));";
+        ss << "\n\n"
+           << "const result = (() => {\n"
+           << "  const _d = (typeof globalThis.ROUND === 'number' && Number.isFinite(globalThis.ROUND)) ? Math.floor(globalThis.ROUND) :\n"
+           << "             (typeof globalThis.round === 'number' && Number.isFinite(globalThis.round)) ? Math.floor(globalThis.round) :\n"
+           << "             (typeof globalThis.ROUND_DIGITS === 'number' && Number.isFinite(globalThis.ROUND_DIGITS)) ? Math.floor(globalThis.ROUND_DIGITS) :\n"
+           << "             (typeof globalThis.round_digits === 'number' && Number.isFinite(globalThis.round_digits)) ? Math.floor(globalThis.round_digits) :\n"
+           << "             (typeof globalThis.round === 'function' && typeof globalThis.round.digits === 'number' && Number.isFinite(globalThis.round.digits)) ? Math.floor(globalThis.round.digits) :\n"
+           << "             undefined;\n"
+           << "  if (_d === undefined || _d === null) return _rawResult;\n"
+           << "  const _roundNum = (n) => {\n"
+           << "    if (typeof n !== 'number' || !Number.isFinite(n)) return n;\n"
+           << "    const factor = Math.pow(10, _d);\n"
+           << "    return Math.round((n + Number.EPSILON) * factor) / factor;\n"
+           << "  };\n"
+           << "  const _deep = (v) => {\n"
+           << "    if (typeof v === 'number') return _roundNum(v);\n"
+           << "    if (Array.isArray(v)) return v.map(_deep);\n"
+           << "    if (v !== null && typeof v === 'object') {\n"
+           << "      const out = Object.create(Object.getPrototypeOf(v));\n"
+           << "      for (const k of Object.keys(v)) out[k] = _deep(v[k]);\n"
+           << "      return out;\n"
+           << "    }\n"
+           << "    return v;\n"
+           << "  };\n"
+           << "  return _deep(_rawResult);\n"
+           << "})();";
 
         return ss.str();
     }

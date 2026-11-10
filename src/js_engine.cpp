@@ -32,7 +32,7 @@
 
 namespace
 {
-const int kMaxInspectDepth = 4;
+const int kMaxInspectDepth = 20;
 const size_t kMaxInlineInspectLength = 80;
 const size_t kQuickJsMemoryLimit = 1024ULL * 1024 * 1024;
 
@@ -508,7 +508,7 @@ std::string inspectArray(JSContext* context, JSValueConst value, int depth, std:
         return "[]";
     }
 
-    std::string compact("[ ");
+    std::string compact("[");
     bool canUseCompact = true;
     for (uint32_t i = 0; i < length; ++i)
     {
@@ -528,7 +528,7 @@ std::string inspectArray(JSContext* context, JSValueConst value, int depth, std:
             compact += ", ";
         }
     }
-    compact += " ]";
+    compact += "]";
 
     if (canUseCompact && compact.size() <= kMaxInlineInspectLength)
     {
@@ -570,8 +570,41 @@ std::string inspectObject(JSContext* context, JSValueConst value, int depth, std
         return "{}";
     }
 
+    bool hasNestedComplex = false;
+    for (uint32_t i = 0; i < propertyCount; ++i)
+    {
+        JSValue pv = JS_GetProperty(context, value, properties[i].atom);
+        if (JS_IsObject(pv))
+        {
+            if (JS_IsArray(pv))
+            {
+                uint32_t len = arrayLength(context, pv);
+                for (uint32_t j = 0; j < len; ++j)
+                {
+                    JSValue elem = JS_GetPropertyUint32(context, pv, j);
+                    if (JS_IsObject(elem))
+                    {
+                        hasNestedComplex = true;
+                        JS_FreeValue(context, elem);
+                        break;
+                    }
+                    JS_FreeValue(context, elem);
+                }
+            }
+            else
+            {
+                hasNestedComplex = true;
+            }
+        }
+        JS_FreeValue(context, pv);
+        if (hasNestedComplex)
+        {
+            break;
+        }
+    }
+
     std::string compact("{ ");
-    bool canUseCompact = true;
+    bool canUseCompact = !hasNestedComplex;
     for (uint32_t i = 0; i < propertyCount; ++i)
     {
         JSValue keyValue = JS_AtomToString(context, properties[i].atom);
