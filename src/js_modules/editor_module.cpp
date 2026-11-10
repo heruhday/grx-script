@@ -978,14 +978,14 @@ namespace js_modules
                    startPoint.isEqualTo(endPoint);
         }
 
-        void addCurveMetrics(JSContext *context, JSValueConst descriptor, AcDbCurve *curve, AcRxClass *objectClass, double lenScale, double areaScale, int roundDigits)
+        void addCurveMetrics(JSContext *context, JSValueConst descriptor, AcDbCurve *curve, AcRxClass *objectClass, int roundDigits)
         {
             double endParam = 0.0;
             double length = 0.0;
             if (curve->getEndParam(endParam) == Acad::eOk &&
                 curve->getDistAtParam(endParam, length) == Acad::eOk)
             {
-                const double lScaled = roundToPrecision(length * lenScale, roundDigits);
+                const double lScaled = roundToPrecision(length, roundDigits);
                 JS_SetPropertyStr(context, descriptor, "l", JS_NewFloat64(context, lScaled));
                 JS_DefinePropertyValueStr(context, descriptor, "length", JS_NewFloat64(context, lScaled), JS_PROP_CONFIGURABLE | JS_PROP_WRITABLE);
             }
@@ -995,19 +995,19 @@ namespace js_modules
                 double area = 0.0;
                 if (curve->getArea(area) == Acad::eOk)
                 {
-                    const double aScaled = roundToPrecision(area * areaScale, roundDigits);
+                    const double aScaled = roundToPrecision(area, roundDigits);
                     JS_SetPropertyStr(context, descriptor, "a", JS_NewFloat64(context, aScaled));
                     JS_DefinePropertyValueStr(context, descriptor, "area", JS_NewFloat64(context, aScaled), JS_PROP_CONFIGURABLE | JS_PROP_WRITABLE);
                 }
             }
         }
 
-        void addRegionMetrics(JSContext *context, JSValueConst descriptor, AcDbRegion *region, double lenScale, double areaScale, int roundDigits)
+        void addRegionMetrics(JSContext *context, JSValueConst descriptor, AcDbRegion *region, int roundDigits)
         {
             double perimeter = 0.0;
             if (region->getPerimeter(perimeter) == Acad::eOk)
             {
-                const double pScaled = roundToPrecision(perimeter * lenScale, roundDigits);
+                const double pScaled = roundToPrecision(perimeter, roundDigits);
                 JS_SetPropertyStr(context, descriptor, "l", JS_NewFloat64(context, pScaled));
                 JS_DefinePropertyValueStr(context, descriptor, "length", JS_NewFloat64(context, pScaled), JS_PROP_CONFIGURABLE | JS_PROP_WRITABLE);
             }
@@ -1015,18 +1015,18 @@ namespace js_modules
             double area = 0.0;
             if (region->getArea(area) == Acad::eOk)
             {
-                const double aScaled = roundToPrecision(area * areaScale, roundDigits);
+                const double aScaled = roundToPrecision(area, roundDigits);
                 JS_SetPropertyStr(context, descriptor, "a", JS_NewFloat64(context, aScaled));
                 JS_DefinePropertyValueStr(context, descriptor, "area", JS_NewFloat64(context, aScaled), JS_PROP_CONFIGURABLE | JS_PROP_WRITABLE);
             }
         }
 
-        void addHatchMetrics(JSContext *context, JSValueConst descriptor, AcDbHatch *hatch, double lenScale, double areaScale, int roundDigits)
+        void addHatchMetrics(JSContext *context, JSValueConst descriptor, AcDbHatch *hatch, int roundDigits)
         {
             double area = 0.0;
             if (hatch->getArea(area) == Acad::eOk)
             {
-                const double aScaled = roundToPrecision(area * areaScale, roundDigits);
+                const double aScaled = roundToPrecision(area, roundDigits);
                 JS_SetPropertyStr(context, descriptor, "a", JS_NewFloat64(context, aScaled));
                 JS_DefinePropertyValueStr(context, descriptor, "area", JS_NewFloat64(context, aScaled), JS_PROP_CONFIGURABLE | JS_PROP_WRITABLE);
             }
@@ -1037,7 +1037,7 @@ namespace js_modules
                 double perimeter = 0.0;
                 if (region->getPerimeter(perimeter) == Acad::eOk)
                 {
-                    const double pScaled = roundToPrecision(perimeter * lenScale, roundDigits);
+                    const double pScaled = roundToPrecision(perimeter, roundDigits);
                     JS_SetPropertyStr(context, descriptor, "l", JS_NewFloat64(context, pScaled));
                     JS_DefinePropertyValueStr(context, descriptor, "length", JS_NewFloat64(context, pScaled), JS_PROP_CONFIGURABLE | JS_PROP_WRITABLE);
                 }
@@ -1045,7 +1045,7 @@ namespace js_modules
             }
         }
 
-        void addMlineMetrics(JSContext *context, JSValueConst descriptor, AcDbMline *mline, double lenScale, double areaScale, int roundDigits)
+        void addMlineMetrics(JSContext *context, JSValueConst descriptor, AcDbMline *mline, int roundDigits)
         {
             const int vertexCount = mline->numVertices();
             if (vertexCount <= 0)
@@ -1072,7 +1072,7 @@ namespace js_modules
                     length += lastPoint.distanceTo(firstPoint);
                 }
 
-                const double lScaled = roundToPrecision(length * lenScale, roundDigits);
+                const double lScaled = roundToPrecision(length, roundDigits);
                 JS_SetPropertyStr(context, descriptor, "l", JS_NewFloat64(context, lScaled));
                 JS_DefinePropertyValueStr(context, descriptor, "length", JS_NewFloat64(context, lScaled), JS_PROP_CONFIGURABLE | JS_PROP_WRITABLE);
             }
@@ -1086,7 +1086,7 @@ namespace js_modules
                     const AcGeVector3d edge2 = mline->vertexAt(i + 1) - firstPoint;
                     areaVector += edge1.crossProduct(edge2);
                 }
-                const double aScaled = roundToPrecision((0.5 * areaVector.length()) * areaScale, roundDigits);
+                const double aScaled = roundToPrecision(0.5 * areaVector.length(), roundDigits);
                 JS_SetPropertyStr(context, descriptor, "a", JS_NewFloat64(context, aScaled));
                 JS_DefinePropertyValueStr(context, descriptor, "area", JS_NewFloat64(context, aScaled), JS_PROP_CONFIGURABLE | JS_PROP_WRITABLE);
             }
@@ -1137,8 +1137,6 @@ namespace js_modules
 
         void addEntityProperties(JSContext *context, JSValueConst descriptor, AcDbEntity *entity)
         {
-            const double lenScale = getCadModelUnitScaleToMetre(entity ? entity->database() : nullptr);
-            const double areaScale = lenScale * lenScale;
             const int roundDigits = getGlobalRoundDigits(context, 3);
 
             AcRxClass *objectClass = entity->isA();
@@ -1148,19 +1146,19 @@ namespace js_modules
                 JS_SetPropertyStr(context, descriptor, "ty", JS_NewString(context, className != nullptr ? command_text::toUtf8(className).c_str() : ""));
                 if (objectClass->isDerivedFrom(AcDbCurve::desc()))
                 {
-                    addCurveMetrics(context, descriptor, static_cast<AcDbCurve *>(entity), objectClass, lenScale, areaScale, roundDigits);
+                    addCurveMetrics(context, descriptor, static_cast<AcDbCurve *>(entity), objectClass, roundDigits);
                 }
                 else if (objectClass->isDerivedFrom(AcDbRegion::desc()))
                 {
-                    addRegionMetrics(context, descriptor, static_cast<AcDbRegion *>(entity), lenScale, areaScale, roundDigits);
+                    addRegionMetrics(context, descriptor, static_cast<AcDbRegion *>(entity), roundDigits);
                 }
                 else if (objectClass->isDerivedFrom(AcDbHatch::desc()))
                 {
-                    addHatchMetrics(context, descriptor, static_cast<AcDbHatch *>(entity), lenScale, areaScale, roundDigits);
+                    addHatchMetrics(context, descriptor, static_cast<AcDbHatch *>(entity), roundDigits);
                 }
                 else if (objectClass->isDerivedFrom(AcDbMline::desc()))
                 {
-                    addMlineMetrics(context, descriptor, static_cast<AcDbMline *>(entity), lenScale, areaScale, roundDigits);
+                    addMlineMetrics(context, descriptor, static_cast<AcDbMline *>(entity), roundDigits);
                 }
                 else if (objectClass->isDerivedFrom(AcDbBlockReference::desc()))
                 {

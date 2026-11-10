@@ -533,9 +533,9 @@ const SELECTION_PRESETS = [
 
 // Unit conversion factors (from CAD drawing unit to meters / m²)
 const UNIT_SCALES = {
+  m: { label: 'm → m (1:1)', lengthDiv: 1, areaDiv: 1 },
   mm: { label: 'mm → m', lengthDiv: 1000, areaDiv: 1000000 },
-  cm: { label: 'cm → m', lengthDiv: 100, areaDiv: 10000 },
-  m: { label: 'm → m (1:1)', lengthDiv: 1, areaDiv: 1 }
+  cm: { label: 'cm → m', lengthDiv: 100, areaDiv: 10000 }
 };
 
 // Helper format number
@@ -635,7 +635,7 @@ export default function App() {
   const [cadDwgName, setCadDwgName] = useState('Structural_Plan_L02.dwg');
   const [cadLayers, setCadLayers] = useState([]);
   const [ipcPort, setIpcPort] = useState(8123);
-  const [unitScale, setUnitScale] = useState('mm');
+  const [unitScale, setUnitScale] = useState('m');
   const [alwaysOnTop, setAlwaysOnTop] = useState(true);
   const [autoWriteXdata, setAutoWriteXdata] = useState(false);
   const [syncStatusMsg, setSyncStatusMsg] = useState('');
