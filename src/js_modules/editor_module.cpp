@@ -42,6 +42,10 @@
 #include "text_util.h"
 #include "js_module_utils.h"
 #include "cad_units.h"
+#ifndef GSTARCAD
+#include "dbsol3d.h"
+#include "dbsurf.h"
+#endif
 
 namespace js_modules
 {
@@ -978,14 +982,14 @@ namespace js_modules
                    startPoint.isEqualTo(endPoint);
         }
 
-        void addCurveMetrics(JSContext *context, JSValueConst descriptor, AcDbCurve *curve, AcRxClass *objectClass, int roundDigits)
+        void addCurveMetrics(JSContext *context, JSValueConst descriptor, AcDbCurve *curve, AcRxClass *objectClass, double lenScale, double areaScale, int roundDigits)
         {
             double endParam = 0.0;
             double length = 0.0;
             if (curve->getEndParam(endParam) == Acad::eOk &&
                 curve->getDistAtParam(endParam, length) == Acad::eOk)
             {
-                const double lScaled = roundToPrecision(length, roundDigits);
+                const double lScaled = roundToPrecision(length * lenScale, roundDigits);
                 JS_SetPropertyStr(context, descriptor, "l", JS_NewFloat64(context, lScaled));
                 JS_DefinePropertyValueStr(context, descriptor, "length", JS_NewFloat64(context, lScaled), JS_PROP_CONFIGURABLE | JS_PROP_WRITABLE);
             }
@@ -995,19 +999,19 @@ namespace js_modules
                 double area = 0.0;
                 if (curve->getArea(area) == Acad::eOk)
                 {
-                    const double aScaled = roundToPrecision(area, roundDigits);
+                    const double aScaled = roundToPrecision(area * areaScale, roundDigits);
                     JS_SetPropertyStr(context, descriptor, "a", JS_NewFloat64(context, aScaled));
                     JS_DefinePropertyValueStr(context, descriptor, "area", JS_NewFloat64(context, aScaled), JS_PROP_CONFIGURABLE | JS_PROP_WRITABLE);
                 }
             }
         }
 
-        void addRegionMetrics(JSContext *context, JSValueConst descriptor, AcDbRegion *region, int roundDigits)
+        void addRegionMetrics(JSContext *context, JSValueConst descriptor, AcDbRegion *region, double lenScale, double areaScale, int roundDigits)
         {
             double perimeter = 0.0;
             if (region->getPerimeter(perimeter) == Acad::eOk)
             {
-                const double pScaled = roundToPrecision(perimeter, roundDigits);
+                const double pScaled = roundToPrecision(perimeter * lenScale, roundDigits);
                 JS_SetPropertyStr(context, descriptor, "l", JS_NewFloat64(context, pScaled));
                 JS_DefinePropertyValueStr(context, descriptor, "length", JS_NewFloat64(context, pScaled), JS_PROP_CONFIGURABLE | JS_PROP_WRITABLE);
             }
@@ -1015,18 +1019,18 @@ namespace js_modules
             double area = 0.0;
             if (region->getArea(area) == Acad::eOk)
             {
-                const double aScaled = roundToPrecision(area, roundDigits);
+                const double aScaled = roundToPrecision(area * areaScale, roundDigits);
                 JS_SetPropertyStr(context, descriptor, "a", JS_NewFloat64(context, aScaled));
                 JS_DefinePropertyValueStr(context, descriptor, "area", JS_NewFloat64(context, aScaled), JS_PROP_CONFIGURABLE | JS_PROP_WRITABLE);
             }
         }
 
-        void addHatchMetrics(JSContext *context, JSValueConst descriptor, AcDbHatch *hatch, int roundDigits)
+        void addHatchMetrics(JSContext *context, JSValueConst descriptor, AcDbHatch *hatch, double lenScale, double areaScale, int roundDigits)
         {
             double area = 0.0;
             if (hatch->getArea(area) == Acad::eOk)
             {
-                const double aScaled = roundToPrecision(area, roundDigits);
+                const double aScaled = roundToPrecision(area * areaScale, roundDigits);
                 JS_SetPropertyStr(context, descriptor, "a", JS_NewFloat64(context, aScaled));
                 JS_DefinePropertyValueStr(context, descriptor, "area", JS_NewFloat64(context, aScaled), JS_PROP_CONFIGURABLE | JS_PROP_WRITABLE);
             }
@@ -1037,7 +1041,7 @@ namespace js_modules
                 double perimeter = 0.0;
                 if (region->getPerimeter(perimeter) == Acad::eOk)
                 {
-                    const double pScaled = roundToPrecision(perimeter, roundDigits);
+                    const double pScaled = roundToPrecision(perimeter * lenScale, roundDigits);
                     JS_SetPropertyStr(context, descriptor, "l", JS_NewFloat64(context, pScaled));
                     JS_DefinePropertyValueStr(context, descriptor, "length", JS_NewFloat64(context, pScaled), JS_PROP_CONFIGURABLE | JS_PROP_WRITABLE);
                 }
@@ -1045,7 +1049,77 @@ namespace js_modules
             }
         }
 
-        void addMlineMetrics(JSContext *context, JSValueConst descriptor, AcDbMline *mline, int roundDigits)
+        void addFaceMetrics(JSContext *context, JSValueConst descriptor, AcDbFace *face, double lenScale, double areaScale, int roundDigits)
+        {
+            AcGePoint3d pt[4];
+            face->getVertexAt(0, pt[0]);
+            face->getVertexAt(1, pt[1]);
+            face->getVertexAt(2, pt[2]);
+            face->getVertexAt(3, pt[3]);
+
+            double perimeter = pt[0].distanceTo(pt[1]) + pt[1].distanceTo(pt[2]);
+            if (pt[2] == pt[3])
+            {
+                perimeter += pt[2].distanceTo(pt[0]);
+            }
+            else
+            {
+                perimeter += pt[2].distanceTo(pt[3]) + pt[3].distanceTo(pt[0]);
+            }
+            const double lScaled = roundToPrecision(perimeter * lenScale, roundDigits);
+            JS_SetPropertyStr(context, descriptor, "l", JS_NewFloat64(context, lScaled));
+            JS_DefinePropertyValueStr(context, descriptor, "length", JS_NewFloat64(context, lScaled), JS_PROP_CONFIGURABLE | JS_PROP_WRITABLE);
+
+            AcGeVector3d v1 = pt[1] - pt[0];
+            AcGeVector3d v2 = pt[2] - pt[0];
+            double area = 0.5 * v1.crossProduct(v2).length();
+            if (pt[2] != pt[3])
+            {
+                AcGeVector3d v3 = pt[3] - pt[0];
+                area += 0.5 * v2.crossProduct(v3).length();
+            }
+            const double aScaled = roundToPrecision(area * areaScale, roundDigits);
+            JS_SetPropertyStr(context, descriptor, "a", JS_NewFloat64(context, aScaled));
+            JS_DefinePropertyValueStr(context, descriptor, "area", JS_NewFloat64(context, aScaled), JS_PROP_CONFIGURABLE | JS_PROP_WRITABLE);
+        }
+
+#ifndef GSTARCAD
+        void addSolidMetrics(JSContext *context, JSValueConst descriptor, AcDb3dSolid *solid, double areaScale, double volScale, int roundDigits)
+        {
+            double area = 0.0;
+            if (solid->getArea(area) == Acad::eOk)
+            {
+                const double aScaled = roundToPrecision(area * areaScale, roundDigits);
+                JS_SetPropertyStr(context, descriptor, "a", JS_NewFloat64(context, aScaled));
+                JS_DefinePropertyValueStr(context, descriptor, "area", JS_NewFloat64(context, aScaled), JS_PROP_CONFIGURABLE | JS_PROP_WRITABLE);
+            }
+
+            double volume = 0.0;
+            AcGePoint3d centroid;
+            double momInertia[3] = {}, prodInertia[3] = {}, prinMoments[3] = {}, radiiGyration[3] = {};
+            AcGeVector3d prinAxes[3] = {};
+            AcDbExtents extents;
+            if (solid->getMassProp(volume, centroid, momInertia, prodInertia, prinMoments, prinAxes, radiiGyration, extents) == Acad::eOk)
+            {
+                const double vScaled = roundToPrecision(volume * volScale, roundDigits);
+                JS_SetPropertyStr(context, descriptor, "v", JS_NewFloat64(context, vScaled));
+                JS_DefinePropertyValueStr(context, descriptor, "volume", JS_NewFloat64(context, vScaled), JS_PROP_CONFIGURABLE | JS_PROP_WRITABLE);
+            }
+        }
+
+        void addSurfaceMetrics(JSContext *context, JSValueConst descriptor, AcDbSurface *surface, double areaScale, int roundDigits)
+        {
+            double area = 0.0;
+            if (surface->getArea(area) == Acad::eOk)
+            {
+                const double aScaled = roundToPrecision(area * areaScale, roundDigits);
+                JS_SetPropertyStr(context, descriptor, "a", JS_NewFloat64(context, aScaled));
+                JS_DefinePropertyValueStr(context, descriptor, "area", JS_NewFloat64(context, aScaled), JS_PROP_CONFIGURABLE | JS_PROP_WRITABLE);
+            }
+        }
+#endif
+
+        void addMlineMetrics(JSContext *context, JSValueConst descriptor, AcDbMline *mline, double lenScale, double areaScale, int roundDigits)
         {
             const int vertexCount = mline->numVertices();
             if (vertexCount <= 0)
@@ -1072,7 +1146,7 @@ namespace js_modules
                     length += lastPoint.distanceTo(firstPoint);
                 }
 
-                const double lScaled = roundToPrecision(length, roundDigits);
+                const double lScaled = roundToPrecision(length * lenScale, roundDigits);
                 JS_SetPropertyStr(context, descriptor, "l", JS_NewFloat64(context, lScaled));
                 JS_DefinePropertyValueStr(context, descriptor, "length", JS_NewFloat64(context, lScaled), JS_PROP_CONFIGURABLE | JS_PROP_WRITABLE);
             }
@@ -1086,7 +1160,7 @@ namespace js_modules
                     const AcGeVector3d edge2 = mline->vertexAt(i + 1) - firstPoint;
                     areaVector += edge1.crossProduct(edge2);
                 }
-                const double aScaled = roundToPrecision(0.5 * areaVector.length(), roundDigits);
+                const double aScaled = roundToPrecision((0.5 * areaVector.length()) * areaScale, roundDigits);
                 JS_SetPropertyStr(context, descriptor, "a", JS_NewFloat64(context, aScaled));
                 JS_DefinePropertyValueStr(context, descriptor, "area", JS_NewFloat64(context, aScaled), JS_PROP_CONFIGURABLE | JS_PROP_WRITABLE);
             }
@@ -1137,6 +1211,9 @@ namespace js_modules
 
         void addEntityProperties(JSContext *context, JSValueConst descriptor, AcDbEntity *entity)
         {
+            const double lenScale = getCadModelUnitScaleToMetre(entity ? entity->database() : nullptr);
+            const double areaScale = lenScale * lenScale;
+            const double volScale = lenScale * lenScale * lenScale;
             const int roundDigits = getGlobalRoundDigits(context, 3);
 
             AcRxClass *objectClass = entity->isA();
@@ -1146,19 +1223,33 @@ namespace js_modules
                 JS_SetPropertyStr(context, descriptor, "ty", JS_NewString(context, className != nullptr ? command_text::toUtf8(className).c_str() : ""));
                 if (objectClass->isDerivedFrom(AcDbCurve::desc()))
                 {
-                    addCurveMetrics(context, descriptor, static_cast<AcDbCurve *>(entity), objectClass, roundDigits);
+                    addCurveMetrics(context, descriptor, static_cast<AcDbCurve *>(entity), objectClass, lenScale, areaScale, roundDigits);
                 }
                 else if (objectClass->isDerivedFrom(AcDbRegion::desc()))
                 {
-                    addRegionMetrics(context, descriptor, static_cast<AcDbRegion *>(entity), roundDigits);
+                    addRegionMetrics(context, descriptor, static_cast<AcDbRegion *>(entity), lenScale, areaScale, roundDigits);
                 }
                 else if (objectClass->isDerivedFrom(AcDbHatch::desc()))
                 {
-                    addHatchMetrics(context, descriptor, static_cast<AcDbHatch *>(entity), roundDigits);
+                    addHatchMetrics(context, descriptor, static_cast<AcDbHatch *>(entity), lenScale, areaScale, roundDigits);
                 }
+                else if (objectClass->isDerivedFrom(AcDbFace::desc()))
+                {
+                    addFaceMetrics(context, descriptor, static_cast<AcDbFace *>(entity), lenScale, areaScale, roundDigits);
+                }
+#ifndef GSTARCAD
+                else if (objectClass->isDerivedFrom(AcDb3dSolid::desc()))
+                {
+                    addSolidMetrics(context, descriptor, static_cast<AcDb3dSolid *>(entity), areaScale, volScale, roundDigits);
+                }
+                else if (objectClass->isDerivedFrom(AcDbSurface::desc()))
+                {
+                    addSurfaceMetrics(context, descriptor, static_cast<AcDbSurface *>(entity), areaScale, roundDigits);
+                }
+#endif
                 else if (objectClass->isDerivedFrom(AcDbMline::desc()))
                 {
-                    addMlineMetrics(context, descriptor, static_cast<AcDbMline *>(entity), roundDigits);
+                    addMlineMetrics(context, descriptor, static_cast<AcDbMline *>(entity), lenScale, areaScale, roundDigits);
                 }
                 else if (objectClass->isDerivedFrom(AcDbBlockReference::desc()))
                 {
