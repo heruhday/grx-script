@@ -1571,6 +1571,18 @@ export default function App() {
     return () => clearTimeout(t);
   }, [autoWriteXdata, cadConnected, location, qtoCode, qtoCategory, weightEntityType, globalXdata, handleApplyXdataToCad]);
 
+  // Global F5 shortcut to trigger 'Apply XData'
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.key === 'F5' || e.code === 'F5') {
+        e.preventDefault();
+        handleApplyXdataToCad();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [handleApplyXdataToCad]);
+
   // Record current QTO calculation into schedule table
   const handleRecordSchedule = () => {
     const entry = {
@@ -2329,11 +2341,12 @@ export default function App() {
         <div className="flex items-center gap-1.5">
           <button
             onClick={handleApplyXdataToCad}
-            title="Write Location, Code, Category & XData to selected AutoCAD / GstarCAD objects"
+            title="Write Location, Code, Category & XData to selected AutoCAD / GstarCAD objects (Shortcut: F5)"
             className="px-2.5 py-1.5 rounded bg-sky-600 hover:bg-sky-500 text-white font-semibold text-xs flex items-center gap-1 shadow transition-colors"
           >
             <UploadCloud className="w-3.5 h-3.5" />
             <span>Apply XData</span>
+            <kbd className="ml-0.5 px-1 py-0.5 text-[9px] leading-none bg-sky-800/80 text-sky-200 rounded border border-sky-400/40 font-mono font-semibold">F5</kbd>
           </button>
 
           <button
