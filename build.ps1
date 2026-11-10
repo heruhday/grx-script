@@ -46,6 +46,7 @@ param(
     [switch]$All,
 
     [switch]$Clean,
+    [switch]$BuildUI,
     [string]$Config = "Release",
     [string]$OutDir = "dist"
 )
@@ -252,18 +253,43 @@ if (Test-Path $runjsLsp) {
     Copy-Item -Path $runjsLsp -Destination (Join-Path $distPath "arx-script.bundle\Contents\runjs.lsp") -Force
 }
 
+# Build QTO Property Box (Tauri) if requested
+$tauriDir = Join-Path $scriptRoot "qto-property-box"
+if ($BuildUI -and (Test-Path $tauriDir)) {
+    Write-Host "`n>>> [QTO Property Box] Building Tauri application..." -ForegroundColor Green
+    Push-Location $tauriDir
+    try {
+        if (-not (Test-Path "node_modules")) {
+            Write-Host "Installing npm dependencies..." -ForegroundColor Cyan
+            npm install
+        }
+        Write-Host "Building web frontend..." -ForegroundColor Cyan
+        npm run build
+        Write-Host "Compiling Tauri Rust binary..." -ForegroundColor Cyan
+        cargo build --release --manifest-path src-tauri\Cargo.toml
+    } finally {
+        Pop-Location
+    }
+}
+
 # Copy QTO Property Box (Tauri executable) to dist/bin and bundle dirs if built
 $tauriExeRelease = Join-Path $scriptRoot "qto-property-box\src-tauri\target\release\qto-property-box.exe"
 $tauriExeDebug = Join-Path $scriptRoot "qto-property-box\src-tauri\target\debug\qto-property-box.exe"
 $tauriExe = if (Test-Path $tauriExeRelease) { $tauriExeRelease } elseif (Test-Path $tauriExeDebug) { $tauriExeDebug } else { $null }
 
 if ($tauriExe) {
-    try { Copy-Item -Path $tauriExe -Destination (Join-Path $distBin "qto-property-box.exe") -Force -ErrorAction SilentlyContinue } catch {}
-    if (Test-Path (Join-Path $distPath "2021")) {
-        try { Copy-Item -Path $tauriExe -Destination (Join-Path $distPath "2021\qto-property-box.exe") -Force -ErrorAction SilentlyContinue } catch {}
+    function Safe-CopyTauri($dst) {
+        if (Test-Path (Split-Path $dst -Parent)) {
+            try {
+                Copy-Item -Path $tauriExe -Destination $dst -Force -ErrorAction SilentlyContinue
+            } catch {}
+        }
     }
-    if (Test-Path (Join-Path $distPath "arx-script.bundle\Contents\2021")) {
-        try { Copy-Item -Path $tauriExe -Destination (Join-Path $distPath "arx-script.bundle\Contents\2021\qto-property-box.exe") -Force -ErrorAction SilentlyContinue } catch {}
+
+    Safe-CopyTauri (Join-Path $distBin "qto-property-box.exe")
+    foreach ($tgt in $targets) {
+        Safe-CopyTauri (Join-Path $distPath "$($tgt.Key)\qto-property-box.exe")
+        Safe-CopyTauri (Join-Path $bundleContents "$($tgt.Key)\qto-property-box.exe")
     }
 }
 

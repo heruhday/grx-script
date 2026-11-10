@@ -2676,6 +2676,17 @@ namespace safe_commands
                 getFn = JS_GetPropertyStr(context, options, "out");
             }
             queryFn = JS_GetPropertyStr(context, options, "query");
+            if (JS_IsString(queryFn))
+            {
+                const std::string dslStr = js_modules::valueToString(context, queryFn);
+                JS_FreeValue(context, queryFn);
+                queryFn = JS_UNDEFINED;
+                if (query_dsl::isDslQuery(dslStr))
+                {
+                    const std::string fnCode = query_dsl::compileToJsFunction(dslStr, "entries");
+                    queryFn = JS_Eval(context, fnCode.c_str(), fnCode.length(), "<query_dsl>", JS_EVAL_TYPE_GLOBAL);
+                }
+            }
             JSValue impliedVal = JS_GetPropertyStr(context, options, "implied");
             if (!JS_IsUndefined(impliedVal))
             {

@@ -307,7 +307,7 @@ std::string evaluateScriptInApplicationContext(const std::string& script)
         reinterpret_cast<WPARAM>(&request),
         0,
         SMTO_NORMAL,
-        8000,
+        20000,
         &dwResult
     );
 
@@ -322,7 +322,7 @@ std::string evaluateScriptInApplicationContext(const std::string& script)
 
 std::string readClientScript(SOCKET client)
 {
-    DWORD recvTimeoutMs = 3000;
+    DWORD recvTimeoutMs = 15000;
     setsockopt(client, SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<const char*>(&recvTimeoutMs), sizeof(recvTimeoutMs));
 
     std::string script;
@@ -334,13 +334,13 @@ std::string readClientScript(SOCKET client)
     }
     script.assign(buffer.data(), buffer.data() + firstRecv);
 
-    // Continue reading any remaining chunks that arrive immediately
+    // Continue reading any remaining chunks that arrive immediately or until EOF
     while (script.size() < static_cast<size_t>(kMaxScriptBytes))
     {
         fd_set readSet;
         FD_ZERO(&readSet);
         FD_SET(client, &readSet);
-        timeval tv = {0, 5000}; // 5ms poll for trailing chunks
+        timeval tv = {0, 100000}; // 100ms poll for trailing chunks
         const int ready = select(0, &readSet, nullptr, nullptr, &tv);
         if (ready <= 0)
         {
@@ -445,6 +445,9 @@ void serverThreadMain(int port)
         {
             break;
         }
+
+        BOOL nodelay = TRUE;
+        setsockopt(client, IPPROTO_TCP, TCP_NODELAY, reinterpret_cast<const char*>(&nodelay), sizeof(nodelay));
 
         if (g_clientThread.joinable())
         {
@@ -619,11 +622,14 @@ void qtoProps()
         candidates.push_back(modDir + L"\\qto-property-box.exe");
         candidates.push_back(modDir + L"\\..\\bin\\qto-property-box.exe");
         candidates.push_back(modDir + L"\\..\\..\\bin\\qto-property-box.exe");
+        candidates.push_back(modDir + L"\\..\\..\\..\\bin\\qto-property-box.exe");
         candidates.push_back(modDir + L"\\..\\..\\qto-property-box\\src-tauri\\target\\release\\qto-property-box.exe");
+        candidates.push_back(modDir + L"\\..\\..\\qto-property-box\\src-tauri\\target\\debug\\qto-property-box.exe");
         candidates.push_back(modDir + L"\\..\\..\\..\\qto-property-box\\src-tauri\\target\\release\\qto-property-box.exe");
+        candidates.push_back(modDir + L"\\..\\..\\..\\qto-property-box\\src-tauri\\target\\debug\\qto-property-box.exe");
+        candidates.push_back(modDir + L"\\..\\..\\..\\..\\qto-property-box\\src-tauri\\target\\release\\qto-property-box.exe");
+        candidates.push_back(modDir + L"\\..\\..\\..\\..\\qto-property-box\\src-tauri\\target\\debug\\qto-property-box.exe");
     }
-    candidates.push_back(L"C:\\Users\\qsten\\OneDrive - PT. Roket Jaya Abadi\\Heru\\temp\\grx-script\\dist\\bin\\qto-property-box.exe");
-    candidates.push_back(L"C:\\Users\\qsten\\OneDrive - PT. Roket Jaya Abadi\\Heru\\temp\\grx-script\\qto-property-box\\src-tauri\\target\\release\\qto-property-box.exe");
 
     std::wstring foundExe;
     for (const auto& cand : candidates)

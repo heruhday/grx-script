@@ -33,8 +33,11 @@ import {
   UploadCloud,
   Wifi,
   WifiOff,
-  Eye
+  Eye,
+  FolderTree
 } from 'lucide-react';
+import WbsReportView from './WbsReportView';
+import DescriptionModal from './DescriptionModal';
 
 // ============================================================================
 // SVG ICONS (Matching stroke style, 24x24 viewBox, currentColor)
@@ -758,6 +761,7 @@ export default function App() {
   const [cadDwgName, setCadDwgName] = useState('Structural_Plan_L02.dwg');
   const [cadLayers, setCadLayers] = useState([]);
   const [ipcPort, setIpcPort] = useState(8123);
+  const [activeNavMenu, setActiveNavMenu] = useState('qto'); // 'qto' | 'report'
   const [unitScale, setUnitScale] = useState('m');
   const [alwaysOnTop, setAlwaysOnTop] = useState(true);
   const [autoWriteXdata, setAutoWriteXdata] = useState(false);
@@ -780,6 +784,72 @@ export default function App() {
   const [qtoCategory, setQtoCategory] = useState('length');
   const [weightEntityType, setWeightEntityType] = useState('line'); // 'line' | 'surface'
   const [xdataMode, setXdataMode] = useState('uniform'); // 'uniform' | 'per_entity'
+
+  // Descriptions Key-Value Store (SQLite table: deskripsi)
+  const [descriptions, setDescriptions] = useState(() => {
+    try {
+      const saved = localStorage.getItem('grx_qto_descriptions');
+      return saved ? JSON.parse(saved) : {};
+    } catch {
+      return {};
+    }
+  });
+  const [showDescModal, setShowDescModal] = useState(false);
+  const [descModalCode, setDescModalCode] = useState('');
+
+  // Load descriptions from SQLite when CAD connects
+  useEffect(() => {
+    if (cadConnected) {
+      invoke('cad_get_descriptions', { port: ipcPort })
+        .then((res) => {
+          if (res && typeof res === 'object' && !res.error) {
+            setDescriptions((prev) => {
+              const merged = { ...prev, ...res };
+              localStorage.setItem('grx_qto_descriptions', JSON.stringify(merged));
+              return merged;
+            });
+          }
+        })
+        .catch((e) => console.warn('Load descriptions error:', e));
+    }
+  }, [cadConnected, ipcPort]);
+
+  const handleSaveDescription = async (code, data) => {
+    setDescriptions((prev) => {
+      const updated = { ...prev, [code]: data };
+      localStorage.setItem('grx_qto_descriptions', JSON.stringify(updated));
+      return updated;
+    });
+    if (cadConnected) {
+      try {
+        await invoke('cad_save_description', {
+          code,
+          items: data.items || [],
+          short: data.short || '',
+          full: data.full || '',
+          port: ipcPort
+        });
+      } catch (e) {
+        console.warn('Save description error:', e);
+      }
+    }
+  };
+
+  const handleDeleteDescription = async (code) => {
+    setDescriptions((prev) => {
+      const updated = { ...prev };
+      delete updated[code];
+      localStorage.setItem('grx_qto_descriptions', JSON.stringify(updated));
+      return updated;
+    });
+    if (cadConnected) {
+      try {
+        await invoke('cad_delete_description', { code, port: ipcPort });
+      } catch (e) {
+        console.warn('Delete description error:', e);
+      }
+    }
+  };
 
   // 5. State Quantities Factors (nr: 1, margin: 1.1, overhead: 1.2)
   // Default to nr: 1, qty: [1] per user specification
@@ -1067,8 +1137,8 @@ export default function App() {
           inferredCat === 'count'
             ? 1
             : usesArea
-            ? Number((rawA / scale.areaDiv).toFixed(3))
-            : Number((rawL / scale.lengthDiv).toFixed(3));
+              ? Number((rawA / scale.areaDiv).toFixed(3))
+              : Number((rawL / scale.lengthDiv).toFixed(3));
 
         return {
           id: e.hand,
@@ -1538,11 +1608,11 @@ export default function App() {
       ...(activeCat === 'column' ? { w: Number(entX.w ?? globalXdata.w ?? 0.5), h: Number(entX.h ?? globalXdata.h ?? 0.5), swpl: Number(entX.swpl ?? globalXdata.swpl ?? 68.0) } : {}),
       ...(activeCat === 'slab' ? { t: Number(entX.t ?? globalXdata.t ?? 0.15), swpa: Number(entX.swpa ?? globalXdata.swpa ?? 18.5) } : {}),
       ...(activeCat === 'weight' ? {
-          ...(weightEntityType === 'line'
-            ? { wpl: Number(entX.wpl ?? globalXdata.wpl ?? 29.6) }
-            : { wpa: Number(entX.wpa ?? globalXdata.wpa ?? 5.4) }),
-          entity_type: weightEntityType
-        } : {}),
+        ...(weightEntityType === 'line'
+          ? { wpl: Number(entX.wpl ?? globalXdata.wpl ?? 29.6) }
+          : { wpa: Number(entX.wpa ?? globalXdata.wpa ?? 5.4) }),
+        entity_type: weightEntityType
+      } : {}),
       qty: qtyFactorsArray
     };
 
@@ -1615,11 +1685,11 @@ export default function App() {
           ...(finalCategory === 'column' ? { w: Number(entX.w ?? globalXdata.w ?? 0.5), h: Number(entX.h ?? globalXdata.h ?? 0.5), swpl: Number(entX.swpl ?? globalXdata.swpl ?? 68.0) } : {}),
           ...(finalCategory === 'slab' ? { t: Number(entX.t ?? globalXdata.t ?? 0.15), swpa: Number(entX.swpa ?? globalXdata.swpa ?? 18.5) } : {}),
           ...(finalCategory === 'weight' ? {
-              ...(weightEntityType === 'line'
-                ? { wpl: Number(entX.wpl ?? globalXdata.wpl ?? 29.6) }
-                : { wpa: Number(entX.wpa ?? globalXdata.wpa ?? 5.4) }),
-              entity_type: weightEntityType
-            } : {}),
+            ...(weightEntityType === 'line'
+              ? { wpl: Number(entX.wpl ?? globalXdata.wpl ?? 29.6) }
+              : { wpa: Number(entX.wpa ?? globalXdata.wpa ?? 5.4) }),
+            entity_type: weightEntityType
+          } : {}),
           qty: qtyFactorsArray
         };
 
@@ -1737,750 +1807,820 @@ export default function App() {
   return (
     <div className="flex flex-col h-screen w-full bg-[#252930] text-slate-200 font-sans select-none overflow-hidden">
       {/* ====================================================================
-          1. COMPACT PALETTE HEADER BAR (AutoCAD / GstarCAD OPM Style)
+          TOP APPLICATION MENU: QTO vs WBS Report (Tree View)
       ==================================================================== */}
-      <header className="bg-[#21252b] border-b border-[#111317] px-2.5 py-2 flex items-center justify-between gap-2 shrink-0">
-        <div className="flex items-center gap-2 min-w-0">
-          <div className="flex items-center gap-1.5 bg-[#c72c2c] text-white px-2 py-0.5 rounded text-[11px] font-bold tracking-wider shadow-sm shrink-0">
-            <Sliders className="w-3 h-3" />
+      <nav className="bg-[#181a20] border-b border-[#111317] px-2.5 py-1.5 flex items-center justify-between shrink-0 select-none">
+        <div className="flex items-center gap-1.5">
+          <button
+            onClick={() => setActiveNavMenu('qto')}
+            className={`flex items-center gap-1.5 px-3 py-1 rounded text-xs font-bold tracking-wide transition-all ${activeNavMenu === 'qto'
+                ? 'bg-[#c72c2c] text-white shadow-sm ring-1 ring-[#e04040]/50'
+                : 'bg-[#22262d] text-slate-400 hover:text-slate-200 hover:bg-[#2b3038]'
+              }`}
+          >
+            <Sliders className="w-3.5 h-3.5" />
             <span>QTO</span>
-          </div>
-          <div className="min-w-0">
-            <div className="flex items-center gap-1.5">
-              <h1 className="text-xs font-bold uppercase tracking-wider text-slate-100 truncate">
-                QTO Property Box
-              </h1>
-              <span
-                onClick={handleManualRefresh}
-                title={
-                  cadConnected
-                    ? `Connected to ${cadPlatform} (${cadDwgName}) on 127.0.0.1:${ipcPort}`
-                    : 'Offline / Demo Simulator Mode (Click to retry CAD connection)'
-                }
-                className={`cursor-pointer inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded font-mono border ${
-                  cadConnected
-                    ? 'bg-emerald-950/70 text-emerald-300 border-emerald-500/40'
-                    : 'bg-amber-950/60 text-amber-300 border-amber-500/40'
-                }`}
-              >
-                {cadConnected ? <Wifi className="w-2.5 h-2.5" /> : <WifiOff className="w-2.5 h-2.5" />}
-                <span>{cadConnected ? cadPlatform : 'Demo'}</span>
-              </span>
-            </div>
-            <p className="text-[10px] text-slate-400 truncate">
-              {cadDwgName} • <span className="text-amber-400 font-mono">{selectedEntities.length} Selected</span>
-            </p>
-          </div>
-        </div>
-
-        {/* Right Controls: Unit Scale, Always-On-Top, Schedule, JSON */}
-        <div className="flex items-center gap-1 shrink-0">
-          {/* Unit Scale Selector (A3) */}
-          <select
-            value={unitScale}
-            onChange={(e) => setUnitScale(e.target.value)}
-            title="Konversi Satuan Gambar CAD ke Meter (m / m²)"
-            className="bg-[#181a1f] text-amber-300 text-[11px] font-mono px-1.5 py-1 rounded border border-slate-700 focus:outline-none focus:border-amber-400"
-          >
-            {Object.entries(UNIT_SCALES).map(([k, v]) => (
-              <option key={k} value={k}>
-                {v.label}
-              </option>
-            ))}
-          </select>
+          </button>
 
           <button
+            onClick={() => setActiveNavMenu('report')}
+            className={`flex items-center gap-1.5 px-3 py-1 rounded text-xs font-bold tracking-wide transition-all ${activeNavMenu === 'report'
+                ? 'bg-sky-600 text-white shadow-sm ring-1 ring-sky-400/50'
+                : 'bg-[#22262d] text-slate-400 hover:text-slate-200 hover:bg-[#2b3038]'
+              }`}
+          >
+            <FolderTree className="w-3.5 h-3.5 text-sky-400" />
+            <span>Report (WBS Tree View)</span>
+          </button>
+        </div>
+
+        <div className="flex items-center gap-2 text-[10px] text-slate-400 font-mono pr-1">
+          <span
             onClick={handleManualRefresh}
-            title="Refresh Selection from AutoCAD / GstarCAD"
-            className="p-1.5 rounded bg-[#2c313a] hover:bg-[#353b45] border border-slate-700 text-slate-300 transition-colors"
+            title={
+              cadConnected
+                ? `Connected to ${cadPlatform} (${cadDwgName}) on 127.0.0.1:${ipcPort}`
+                : 'Offline / Demo Simulator Mode (Click to retry CAD connection)'
+            }
+            className={`cursor-pointer inline-flex items-center gap-1 px-1.5 py-0.5 rounded font-mono border ${cadConnected
+                ? 'bg-emerald-950/70 text-emerald-300 border-emerald-500/40'
+                : 'bg-amber-950/60 text-amber-300 border-amber-500/40'
+              }`}
           >
-            <RefreshCw className="w-3.5 h-3.5" />
-          </button>
-
-          <button
-            onClick={handleToggleAlwaysOnTop}
-            title={alwaysOnTop ? 'Pinned Always-on-Top (Click to unpin)' : 'Pin Window Always-on-Top'}
-            className={`p-1.5 rounded border transition-colors ${
-              alwaysOnTop
-                ? 'bg-amber-500/20 border-amber-500/60 text-amber-300'
-                : 'bg-[#2c313a] border-slate-700 text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            {alwaysOnTop ? <Pin className="w-3.5 h-3.5" /> : <PinOff className="w-3.5 h-3.5" />}
-          </button>
-
-          <button
-            onClick={() => setShowScheduleDrawer((prev) => !prev)}
-            title="Toggle BOQ Schedule Drawer"
-            className={`px-2 py-1 rounded text-[11px] font-medium border flex items-center gap-1 transition-colors ${
-              showScheduleDrawer
-                ? 'bg-sky-500/20 border-sky-500 text-sky-300'
-                : 'bg-[#2c313a] border-slate-700 text-slate-300 hover:bg-[#353b45]'
-            }`}
-          >
-            <Table className="w-3.5 h-3.5" />
-            <span>{savedSchedule.length}</span>
-          </button>
-
-          <button
-            onClick={() => setShowJsonModal(true)}
-            title="Live JSON Schema Output"
-            className="px-2 py-1 rounded text-[11px] font-medium bg-[#2c313a] border border-slate-700 text-slate-300 hover:bg-[#353b45] flex items-center gap-1 transition-colors"
-          >
-            <Code2 className="w-3.5 h-3.5 text-amber-400" />
-            <span>JSON</span>
-          </button>
+            {cadConnected ? <Wifi className="w-2.5 h-2.5" /> : <WifiOff className="w-2.5 h-2.5" />}
+            <span>{cadConnected ? cadPlatform : 'Demo'}</span>
+          </span>
         </div>
-      </header>
+      </nav>
 
-      {/* ====================================================================
+      {activeNavMenu === 'report' ? (
+        <WbsReportView
+          cadConnected={cadConnected}
+          cadPlatform={cadPlatform}
+          cadDwgName={cadDwgName}
+          ipcPort={ipcPort}
+          selectedEntities={selectedEntities}
+          descriptions={descriptions}
+          onSaveDescription={handleSaveDescription}
+          onDeleteDescription={handleDeleteDescription}
+        />
+      ) : (
+        <>
+          {/* ====================================================================
+              1. COMPACT PALETTE HEADER BAR (AutoCAD / GstarCAD OPM Style)
+          ==================================================================== */}
+          <header className="bg-[#21252b] border-b border-[#111317] px-2.5 py-2 flex items-center justify-between gap-2 shrink-0">
+            <div className="flex items-center gap-2 min-w-0">
+              <div className="flex items-center gap-1.5 bg-[#c72c2c] text-white px-2 py-0.5 rounded text-[11px] font-bold tracking-wider shadow-sm shrink-0">
+                <Sliders className="w-3 h-3" />
+                <span>QTO</span>
+              </div>
+              <div className="min-w-0">
+                <div className="flex items-center gap-1.5">
+                  <h1 className="text-xs font-bold uppercase tracking-wider text-slate-100 truncate">
+                    QTO Property Box
+                  </h1>
+                  <span
+                    onClick={handleManualRefresh}
+                    title={
+                      cadConnected
+                        ? `Connected to ${cadPlatform} (${cadDwgName}) on 127.0.0.1:${ipcPort}`
+                        : 'Offline / Demo Simulator Mode (Click to retry CAD connection)'
+                    }
+                    className={`cursor-pointer inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded font-mono border ${cadConnected
+                        ? 'bg-emerald-950/70 text-emerald-300 border-emerald-500/40'
+                        : 'bg-amber-950/60 text-amber-300 border-amber-500/40'
+                      }`}
+                  >
+                    {cadConnected ? <Wifi className="w-2.5 h-2.5" /> : <WifiOff className="w-2.5 h-2.5" />}
+                    <span>{cadConnected ? cadPlatform : 'Demo'}</span>
+                  </span>
+                </div>
+                <p className="text-[10px] text-slate-400 truncate">
+                  {cadDwgName} • <span className="text-amber-400 font-mono">{selectedEntities.length} Selected</span>
+                </p>
+              </div>
+            </div>
+
+            {/* Right Controls: Unit Scale, Always-On-Top, Schedule, JSON */}
+            <div className="flex items-center gap-1 shrink-0">
+              {/* Unit Scale Selector (A3) */}
+              <select
+                value={unitScale}
+                onChange={(e) => setUnitScale(e.target.value)}
+                title="Konversi Satuan Gambar CAD ke Meter (m / m²)"
+                className="bg-[#181a1f] text-amber-300 text-[11px] font-mono px-1.5 py-1 rounded border border-slate-700 focus:outline-none focus:border-amber-400"
+              >
+                {Object.entries(UNIT_SCALES).map(([k, v]) => (
+                  <option key={k} value={k}>
+                    {v.label}
+                  </option>
+                ))}
+              </select>
+
+              <button
+                onClick={handleManualRefresh}
+                title="Refresh Selection from AutoCAD / GstarCAD"
+                className="p-1.5 rounded bg-[#2c313a] hover:bg-[#353b45] border border-slate-700 text-slate-300 transition-colors"
+              >
+                <RefreshCw className="w-3.5 h-3.5" />
+              </button>
+
+              <button
+                onClick={handleToggleAlwaysOnTop}
+                title={alwaysOnTop ? 'Pinned Always-on-Top (Click to unpin)' : 'Pin Window Always-on-Top'}
+                className={`p-1.5 rounded border transition-colors ${alwaysOnTop
+                    ? 'bg-amber-500/20 border-amber-500/60 text-amber-300'
+                    : 'bg-[#2c313a] border-slate-700 text-slate-400 hover:text-slate-200'
+                  }`}
+              >
+                {alwaysOnTop ? <Pin className="w-3.5 h-3.5" /> : <PinOff className="w-3.5 h-3.5" />}
+              </button>
+
+              <button
+                onClick={() => setShowScheduleDrawer((prev) => !prev)}
+                title="Toggle BOQ Schedule Drawer"
+                className={`px-2 py-1 rounded text-[11px] font-medium border flex items-center gap-1 transition-colors ${showScheduleDrawer
+                    ? 'bg-sky-500/20 border-sky-500 text-sky-300'
+                    : 'bg-[#2c313a] border-slate-700 text-slate-300 hover:bg-[#353b45]'
+                  }`}
+              >
+                <Table className="w-3.5 h-3.5" />
+                <span>{savedSchedule.length}</span>
+              </button>
+
+              <button
+                onClick={() => setShowJsonModal(true)}
+                title="Live JSON Schema Output"
+                className="px-2 py-1 rounded text-[11px] font-medium bg-[#2c313a] border border-slate-700 text-slate-300 hover:bg-[#353b45] flex items-center gap-1 transition-colors"
+              >
+                <Code2 className="w-3.5 h-3.5 text-amber-400" />
+                <span>JSON</span>
+              </button>
+            </div>
+          </header>
+
+          {/* ====================================================================
           2. QUICK SELECT LAYER / CATEGORY BAR (Top of OPM Palette)
       ==================================================================== */}
-      <div className="p-2 bg-[#1c1f24] border-b border-[#141619] space-y-1.5 shrink-0">
-        {/* Layer / Category Drop-down */}
-        <div className="flex items-center gap-1.5">
-          <Layers className="w-4 h-4 text-sky-400 shrink-0" />
-          <select
-            value={qtoCategory}
-            onChange={(e) => {
-              const cat = e.target.value;
-              const preset = SELECTION_PRESETS.find((p) => p.category === cat);
-              if (!cadConnected && preset) {
-                handleSelectLayerInCad(preset.layer, preset.category, preset.code);
-              } else {
-                handleCategorySelect(cat);
-              }
-            }}
-            className={`flex-1 bg-[#14161a] text-xs px-2 py-1.5 rounded border border-slate-700 focus:outline-none focus:border-amber-400 font-medium ${
-              qtoCategory === '<Varies>' ? 'text-amber-400 italic' : 'text-slate-100'
-            }`}
-          >
-            {qtoCategory === '<Varies>' && (
-              <option value="<Varies>">&lt;Varies&gt; (Multiple Categories)</option>
-            )}
-            <option value="wall">Wall — Layer: A-WALL (Length × wh)</option>
-            <option value="beam">Beam — Layer: S-BEAM (Concrete & Steel)</option>
-            <option value="column">Column — Layer: S-COL (Concrete & Steel)</option>
-            <option value="slab">Slab — Layer: S-SLAB (Area × t & swpa)</option>
-            <option value="weight">Weight — Layer: S-STEEL (wpl / wpa)</option>
-            <option value="count">Count — Layer: A-FIXT (Block Insert)</option>
-            <option value="length">Length (Linear Measurement)</option>
-            <option value="area">Area (Surface Measurement)</option>
-          </select>
-
-          {/* If connected to CAD and drawing has layers, allow selecting any CAD layer directly */}
-          {cadConnected && cadLayers.length > 0 && (
-            <select
-              defaultValue=""
-              onChange={(e) => {
-                if (e.target.value) {
-                  handleSelectLayerInCad(e.target.value);
-                  e.target.value = '';
-                }
-              }}
-              className="w-36 bg-[#14161a] text-sky-300 text-[11px] px-2 py-1.5 rounded border border-sky-500/30 focus:outline-none focus:border-sky-400"
-              title="Select all objects on a CAD Layer"
-            >
-              <option value="" disabled>
-                Select CAD Layer...
-              </option>
-              {cadLayers.map((l) => (
-                <option key={l.layer} value={l.layer}>
-                  {l.layer} ({l.count})
-                </option>
-              ))}
-            </select>
-          )}
-        </div>
-
-        {/* Category Quick Pills */}
-        <div className="flex items-center gap-1 overflow-x-auto pb-0.5">
-          {QUICK_CATEGORY_PILLS.map((pill) => {
-            const isActive = qtoCategory === pill.id;
-            const IconComp = pill.icon;
-            return (
-              <button
-                key={pill.id}
-                onClick={() => handleCategorySelect(pill.id)}
-                className={`px-2 py-1 rounded text-[10px] font-semibold transition-all flex items-center gap-1.5 whitespace-nowrap ${
-                  isActive
-                    ? 'bg-amber-500 text-slate-950 shadow-sm'
-                    : 'bg-[#282c34] text-slate-300 hover:bg-[#323842] hover:text-white'
-                }`}
-                title={`Set category to ${pill.label}`}
+          <div className="p-2 bg-[#1c1f24] border-b border-[#141619] space-y-1.5 shrink-0">
+            {/* Layer / Category Drop-down */}
+            <div className="flex items-center gap-1.5">
+              <Layers className="w-4 h-4 text-sky-400 shrink-0" />
+              <select
+                value={qtoCategory}
+                onChange={(e) => {
+                  const cat = e.target.value;
+                  const preset = SELECTION_PRESETS.find((p) => p.category === cat);
+                  if (!cadConnected && preset) {
+                    handleSelectLayerInCad(preset.layer, preset.category, preset.code);
+                  } else {
+                    handleCategorySelect(cat);
+                  }
+                }}
+                className={`flex-1 bg-[#14161a] text-xs px-2 py-1.5 rounded border border-slate-700 focus:outline-none focus:border-amber-400 font-medium ${qtoCategory === '<Varies>' ? 'text-amber-400 italic' : 'text-slate-100'
+                  }`}
               >
-                <IconComp className={`w-3.5 h-3.5 shrink-0 ${isActive ? 'text-slate-950' : 'text-sky-400'}`} />
-                <span>{pill.label}</span>
-              </button>
-            );
-          })}
-        </div>
-      </div>
+                {qtoCategory === '<Varies>' && (
+                  <option value="<Varies>">&lt;Varies&gt; (Multiple Categories)</option>
+                )}
+                <option value="wall">Wall — Layer: A-WALL (Length × wh)</option>
+                <option value="beam">Beam — Layer: S-BEAM (Concrete & Steel)</option>
+                <option value="column">Column — Layer: S-COL (Concrete & Steel)</option>
+                <option value="slab">Slab — Layer: S-SLAB (Area × t & swpa)</option>
+                <option value="weight">Weight — Layer: S-STEEL (wpl / wpa)</option>
+                <option value="count">Count — Layer: A-FIXT (Block Insert)</option>
+                <option value="length">Length (Linear Measurement)</option>
+                <option value="area">Area (Surface Measurement)</option>
+              </select>
 
-      {/* Status Banner when syncing with AutoCAD / GstarCAD */}
-      {syncStatusMsg && (
-        <div className="bg-sky-950/90 border-b border-sky-500/40 px-3 py-1 text-[11px] text-sky-200 flex items-center justify-between shrink-0">
-          <span>{syncStatusMsg}</span>
-          <button onClick={() => setSyncStatusMsg('')} className="text-sky-400 hover:text-white">
-            <X className="w-3 h-3" />
-          </button>
-        </div>
-      )}
-
-      {/* ====================================================================
-          3. SCROLLABLE 2-COLUMN AUTOCAD OPM PROPERTY GRID
-      ==================================================================== */}
-      <div className="flex-1 overflow-y-auto divide-y divide-[#181a1f] text-xs">
-        {/* ----------------------------------------------------------------
-            GROUP 1: LOCATION (Building, Floor, Room)
-        ---------------------------------------------------------------- */}
-        <div>
-          <button
-            onClick={() => toggleSection('location')}
-            className="w-full bg-[#2f3540] hover:bg-[#363d4a] px-3 py-1.5 flex items-center justify-between text-left font-semibold text-slate-200 transition-colors"
-          >
-            <span className="flex items-center gap-1.5">
-              {openSections.location ? (
-                <ChevronDown className="w-3.5 h-3.5 text-amber-400" />
-              ) : (
-                <ChevronRight className="w-3.5 h-3.5 text-slate-400" />
-              )}
-              <MapPin className="w-3.5 h-3.5 text-amber-400" />
-              <span>Location</span>
-            </span>
-            <span className="text-[10px] font-mono text-slate-400">props.location</span>
-          </button>
-
-          {openSections.location && (
-            <div className="bg-[#1e2228] divide-y divide-[#282c34]">
-              {/* Location */}
-              <div className="grid grid-cols-12 items-center">
-                <label className="col-span-5 px-3 py-1.5 text-slate-300 border-r border-[#282c34] truncate">
-                  Location
-                </label>
-                <div className="col-span-7 px-2 py-1">
-                  <input
-                    type="text"
-                    value={location.Location}
-                    placeholder={location.Location === '<Varies>' ? '<Varies>' : 'Enter location (e.g. Rumah)...'}
-                    onFocus={(e) => {
-                      if (e.target.value === '<Varies>') e.target.select();
-                    }}
-                    onChange={(e) =>
-                      setLocation((prev) => ({ ...prev, Location: e.target.value }))
+              {/* If connected to CAD and drawing has layers, allow selecting any CAD layer directly */}
+              {cadConnected && cadLayers.length > 0 && (
+                <select
+                  defaultValue=""
+                  onChange={(e) => {
+                    if (e.target.value) {
+                      handleSelectLayerInCad(e.target.value);
+                      e.target.value = '';
                     }
-                    className={`w-full bg-[#15181c] px-2 py-1 rounded border border-slate-700/80 focus:outline-none focus:border-amber-400 ${
-                      location.Location === '<Varies>' ? 'text-amber-400 font-mono italic text-[11px]' : 'text-slate-100'
-                    }`}
-                  />
-                </div>
-              </div>
-
-              {/* Floor */}
-              <div className="grid grid-cols-12 items-center">
-                <label className="col-span-5 px-3 py-1.5 text-slate-300 border-r border-[#282c34] truncate">
-                  Floor
-                </label>
-                <div className="col-span-7 px-2 py-1">
-                  <input
-                    type="text"
-                    value={location.Floor}
-                    placeholder={location.Floor === '<Varies>' ? '<Varies>' : 'e.g. 1st Floor'}
-                    onFocus={(e) => {
-                      if (e.target.value === '<Varies>') e.target.select();
-                    }}
-                    onChange={(e) =>
-                      setLocation((prev) => ({ ...prev, Floor: e.target.value }))
-                    }
-                    className={`w-full bg-[#15181c] px-2 py-1 rounded border border-slate-700/80 focus:outline-none focus:border-amber-400 ${
-                      location.Floor === '<Varies>' ? 'text-amber-400 font-mono italic text-[11px]' : 'text-slate-100'
-                    }`}
-                  />
-                </div>
-              </div>
-
-              {/* Area (Room) */}
-              <div className="grid grid-cols-12 items-center">
-                <label className="col-span-5 px-3 py-1.5 text-slate-300 border-r border-[#282c34] truncate">
-                  Area (Room)
-                </label>
-                <div className="col-span-7 px-2 py-1">
-                  <input
-                    type="text"
-                    value={location.Area}
-                    placeholder={location.Area === '<Varies>' ? '<Varies>' : 'e.g. Room'}
-                    onFocus={(e) => {
-                      if (e.target.value === '<Varies>') e.target.select();
-                    }}
-                    onChange={(e) =>
-                      setLocation((prev) => ({ ...prev, Area: e.target.value }))
-                    }
-                    className={`w-full bg-[#15181c] px-2 py-1 rounded border border-slate-700/80 focus:outline-none focus:border-amber-400 ${
-                      location.Area === '<Varies>' ? 'text-amber-400 font-mono italic text-[11px]' : 'text-slate-100'
-                    }`}
-                  />
-                </div>
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* ----------------------------------------------------------------
-            GROUP 2: TYPES (Code, Category, Entity Type)
-        ---------------------------------------------------------------- */}
-        <div>
-          <button
-            onClick={() => toggleSection('types')}
-            className="w-full bg-[#2f3540] hover:bg-[#363d4a] px-3 py-1.5 flex items-center justify-between text-left font-semibold text-slate-200 transition-colors"
-          >
-            <span className="flex items-center gap-1.5">
-              {openSections.types ? (
-                <ChevronDown className="w-3.5 h-3.5 text-amber-400" />
-              ) : (
-                <ChevronRight className="w-3.5 h-3.5 text-slate-400" />
-              )}
-              <Box className="w-3.5 h-3.5 text-sky-400" />
-              <span>Types</span>
-            </span>
-            <span className="text-[10px] font-mono text-slate-400">props.types</span>
-          </button>
-
-          {openSections.types && (
-            <div className="bg-[#1e2228] divide-y divide-[#282c34]">
-              {/* Code */}
-              <div className="grid grid-cols-12 items-center">
-                <label className="col-span-5 px-3 py-1.5 text-slate-300 border-r border-[#282c34] truncate">
-                  Code
-                </label>
-                <div className="col-span-7 px-2 py-1">
-                  <input
-                    type="text"
-                    value={qtoCode}
-                    placeholder={qtoCode === '<Varies>' ? '<Varies>' : 'Work item code (e.g. FloorFin/CT1)...'}
-                    onFocus={(e) => {
-                      if (e.target.value === '<Varies>') e.target.select();
-                    }}
-                    onChange={(e) => setQtoCode(e.target.value)}
-                    className={`w-full bg-[#15181c] font-mono px-2 py-1 rounded border border-slate-700/80 focus:outline-none focus:border-amber-400 ${
-                      qtoCode === '<Varies>' ? 'text-amber-400 italic text-[11px]' : 'text-amber-300'
-                    }`}
-                  />
-                </div>
-              </div>
-
-              {/* Category */}
-              <div className="grid grid-cols-12 items-center">
-                <label className="col-span-5 px-3 py-1.5 text-slate-300 border-r border-[#282c34] truncate">
-                  Category
-                </label>
-                <div className="col-span-7 px-2 py-1">
-                  <select
-                    value={qtoCategory}
-                    onChange={(e) => handleCategorySelect(e.target.value)}
-                    className={`w-full bg-[#15181c] px-2 py-1 rounded border border-slate-700/80 focus:outline-none focus:border-amber-400 font-medium ${
-                      qtoCategory === '<Varies>' ? 'text-amber-400 italic' : 'text-slate-100'
-                    }`}
-                  >
-                    {qtoCategory === '<Varies>' && (
-                      <option value="<Varies>">&lt;Varies&gt; (Multiple Categories)</option>
-                    )}
-                    <option value="length">length</option>
-                    <option value="area">area</option>
-                    <option value="wall">wall</option>
-                    <option value="count">count</option>
-                    <option value="weight">weight</option>
-                    <option value="beam">beam</option>
-                    <option value="column">column</option>
-                    <option value="slab">slab</option>
-                  </select>
-                </div>
-              </div>
-
-              {/* Entity Type selector (specifically needed when Category == weight) */}
-              {qtoCategory === 'weight' && (
-                <div className="grid grid-cols-12 items-center bg-pink-500/5">
-                  <label className="col-span-5 px-3 py-1.5 text-pink-300 border-r border-[#282c34] truncate">
-                    entity_type
-                  </label>
-                  <div className="col-span-7 px-2 py-1">
-                    <select
-                      value={weightEntityType}
-                      onChange={(e) => setWeightEntityType(e.target.value)}
-                      className="w-full bg-[#15181c] text-pink-200 px-2 py-1 rounded border border-pink-500/40 focus:outline-none"
-                    >
-                      <option value="line">line (length × xdata: wpl)</option>
-                      <option value="surface">surface (area × xdata: wpa)</option>
-                    </select>
-                  </div>
-                </div>
-              )}
-
-              {/* Formula Rule Preview */}
-              <div className="grid grid-cols-12 items-center">
-                <label className="col-span-5 px-3 py-1.5 text-slate-400 border-r border-[#282c34] truncate">
-                  Rule
-                </label>
-                <div
-                  className="col-span-7 px-2.5 py-1.5 text-[11px] font-mono text-slate-400 truncate"
-                  title={activeCategoryConfig.formulaLabel}
+                  }}
+                  className="w-36 bg-[#14161a] text-sky-300 text-[11px] px-2 py-1.5 rounded border border-sky-500/30 focus:outline-none focus:border-sky-400"
+                  title="Select all objects on a CAD Layer"
                 >
-                  {activeCategoryConfig.formulaLabel}
-                </div>
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* ----------------------------------------------------------------
-            GROUP 3: EXTENDED ENTITY DATA (XDATA PARAMETERS)
-        ---------------------------------------------------------------- */}
-        <div>
-          <button
-            onClick={() => toggleSection('xdata')}
-            className="w-full bg-[#2f3540] hover:bg-[#363d4a] px-3 py-1.5 flex items-center justify-between text-left font-semibold text-slate-200 transition-colors"
-          >
-            <span className="flex items-center gap-1.5">
-              {openSections.xdata ? (
-                <ChevronDown className="w-3.5 h-3.5 text-amber-400" />
-              ) : (
-                <ChevronRight className="w-3.5 h-3.5 text-slate-400" />
-              )}
-              <Database className="w-3.5 h-3.5 text-emerald-400" />
-              <span>XData Parameters (xdata)</span>
-            </span>
-            <span className="text-[10px] font-mono text-emerald-400">
-              {activeXdataFields.length > 0
-                ? activeXdataFields.map((f) => f.key).join(', ')
-                : 'direct'}
-            </span>
-          </button>
-
-          {openSections.xdata && (
-            <div className="bg-[#1e2228] divide-y divide-[#282c34]">
-              {activeXdataFields.length === 0 ? (
-                <div className="px-3 py-2 text-slate-400 text-[11px]">
-                  Kategori <strong className="text-slate-200">{qtoCategory}</strong> menghitung
-                  langsung geometri objek CAD (<code className="text-sky-400">quantities</code>)
-                  tanpa parameter pengali XData tambahan.
-                </div>
-              ) : (
-                <>
-                  {/* Evaluation Mode Toggle */}
-                  <div className="grid grid-cols-12 items-center bg-[#181b20]">
-                    <label className="col-span-5 px-3 py-1.5 text-slate-400 border-r border-[#282c34] text-[11px]">
-                      XData Scope
-                    </label>
-                    <div className="col-span-7 px-2 py-1 flex gap-1">
-                      <button
-                        onClick={() => setXdataMode('uniform')}
-                        className={`flex-1 py-0.5 rounded text-[11px] font-medium ${
-                          xdataMode === 'uniform'
-                            ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
-                            : 'bg-slate-800 text-slate-400'
-                        }`}
-                      >
-                        Uniform
-                      </button>
-                      <button
-                        onClick={() => setXdataMode('per_entity')}
-                        className={`flex-1 py-0.5 rounded text-[11px] font-medium ${
-                          xdataMode === 'per_entity'
-                            ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
-                            : 'bg-slate-800 text-slate-400'
-                        }`}
-                      >
-                        Per-Entity
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* Dynamic XData Fields */}
-                  {activeXdataFields.map((field) => (
-                    <div key={field.key} className="grid grid-cols-12 items-center">
-                      <label className="col-span-6 px-3 py-1.5 text-slate-300 border-r border-[#282c34] flex items-center justify-between gap-1">
-                        <span className="truncate" title={field.label}>
-                          {field.label}
-                        </span>
-                        <span className="text-[10px] font-mono text-emerald-400 bg-emerald-950/60 px-1 rounded shrink-0">
-                          {field.key}
-                        </span>
-                      </label>
-                      <div className="col-span-6 px-2 py-1 flex items-center gap-1.5">
-                        <UsNumberInput
-                          step={field.step}
-                          value={globalXdata[field.key]}
-                          onChange={(val) => handleGlobalXdataChange(field.key, val)}
-                          className="w-full bg-[#15181c] text-emerald-300 font-mono px-2 py-1 rounded border border-slate-700/80 focus:outline-none focus:border-emerald-400 text-right text-xs"
-                        />
-                        <span className="text-[11px] text-slate-400 w-10 shrink-0 font-mono">
-                          {field.unit}
-                        </span>
-                      </div>
-                    </div>
+                  <option value="" disabled>
+                    Select CAD Layer...
+                  </option>
+                  {cadLayers.map((l) => (
+                    <option key={l.layer} value={l.layer}>
+                      {l.layer} ({l.count})
+                    </option>
                   ))}
-                </>
+                </select>
               )}
             </div>
-          )}
-        </div>
 
-        {/* ----------------------------------------------------------------
-            GROUP 4: QUANTITIES / FACTORS (Product of Values)
-        ---------------------------------------------------------------- */}
-        <div>
-          <button
-            onClick={() => toggleSection('quantities')}
-            className="w-full bg-[#2f3540] hover:bg-[#363d4a] px-3 py-1.5 flex items-center justify-between text-left font-semibold text-slate-200 transition-colors"
-          >
-            <span className="flex items-center gap-1.5">
-              {openSections.quantities ? (
-                <ChevronDown className="w-3.5 h-3.5 text-amber-400" />
-              ) : (
-                <ChevronRight className="w-3.5 h-3.5 text-slate-400" />
-              )}
-              <Calculator className="w-3.5 h-3.5 text-purple-400" />
-              <span>Quantities ([number])</span>
-            </span>
-            <span className="text-[10px] font-mono text-amber-300 truncate max-w-[190px]">
-              [{qtyFactorsArray.join(', ')}] = {fmt(factorProduct, 2)}x
-            </span>
-          </button>
-
-          {openSections.quantities && (
-            <div className="bg-[#1e2228] p-2 space-y-2">
-              {/* Base CAD Geometry summary header */}
-              <div className="flex items-center justify-between text-[11px] bg-[#17191e] px-2.5 py-1.5 rounded border border-slate-800">
-                <span className="text-slate-400">
-                  Base Geometry:{' '}
-                  <strong className="text-slate-100 font-mono">
-                    {fmt(qtoResult.sumProductBase, 3)} {activeCategoryConfig.baseUnit}
-                  </strong>
-                  {selectedEntities.length > 0 && (
-                    <span className="text-[10px] text-slate-500 ml-1.5">
-                      ({selectedEntities.length} obj{selectedEntities.length > 1 ? 's' : ''})
-                    </span>
-                  )}
-                </span>
-                <button
-                  type="button"
-                  onClick={handleAddFactorRow}
-                  className="text-amber-400 hover:text-amber-300 flex items-center gap-1 text-[11px] font-semibold bg-amber-400/10 hover:bg-amber-400/20 px-2 py-0.5 rounded transition-colors"
-                  title="Add factor row (e.g. nr, margin, overhead)"
-                >
-                  <Plus className="w-3 h-3" />
-                  <span>Add Row</span>
-                </button>
-              </div>
-
-              {/* Factors List (nr, margin, overhead, etc.) */}
-              <div className="divide-y divide-slate-800 border border-slate-800 rounded bg-[#15181c] overflow-hidden">
-                {factors.map((f, idx) => (
-                  <div key={f.id} className="px-2.5 py-1.5 flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-1.5 flex-1 min-w-0">
-                      <span className="text-slate-500 text-[10px] font-mono w-3.5 text-center">
-                        {idx + 1}.
-                      </span>
-                      <input
-                        type="text"
-                        value={f.name}
-                        onChange={(e) => handleUpdateFactor(f.id, 'name', e.target.value)}
-                        placeholder="factor name (e.g. nr, margin)"
-                        className="flex-1 min-w-[70px] bg-[#1e2229] font-mono text-slate-200 text-xs px-2 py-1 rounded border border-slate-700 focus:outline-none focus:border-amber-400"
-                      />
-                    </div>
-                    <div className="flex items-center gap-1.5 shrink-0">
-                      <span className="text-slate-500 text-xs font-mono">×</span>
-                      <div className="w-20">
-                        <UsNumberInput
-                          step={0.05}
-                          value={f.value}
-                          onChange={(val) => handleUpdateFactor(f.id, 'value', val)}
-                          className="w-full bg-[#1e2229] text-right font-mono text-amber-300 text-xs px-2 py-1 rounded border border-slate-700 focus:outline-none focus:border-amber-400"
-                          title={`Factor value for ${f.name}`}
-                        />
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => handleRemoveFactorRow(f.id)}
-                        disabled={factors.length <= 1}
-                        title={factors.length <= 1 ? 'Minimum 1 factor required' : `Delete ${f.name}`}
-                        className={`p-1 rounded text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 transition-colors ${
-                          factors.length <= 1 ? 'opacity-30 cursor-not-allowed' : ''
-                        }`}
-                      >
-                        <Trash2 className="w-3 h-3" />
-                      </button>
-                    </div>
-                  </div>
-                ))}
-
-                {/* Factors product calculation summary */}
-                <div className="bg-[#191c22] px-2.5 py-1.5 flex items-center justify-between text-[11px] text-slate-400 border-t border-slate-800">
-                  <span className="truncate max-w-[210px] text-slate-400 text-[10px] font-mono">
-                    Factor Product ({factors.map((f) => f.name || '?').join(' × ')}):
-                  </span>
-                  <span className="font-mono text-amber-300 font-bold text-xs">
-                    {fmt(factorProduct, 3)}
-                  </span>
-                </div>
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* ----------------------------------------------------------------
-            GROUP 5: COMPUTED OUTPUT (default_value)
-        ---------------------------------------------------------------- */}
-        <div>
-          <button
-            onClick={() => toggleSection('output')}
-            className="w-full bg-[#2f3540] hover:bg-[#363d4a] px-3 py-1.5 flex items-center justify-between text-left font-semibold text-slate-200 transition-colors"
-          >
-            <span className="flex items-center gap-1.5">
-              {openSections.output ? (
-                <ChevronDown className="w-3.5 h-3.5 text-amber-400" />
-              ) : (
-                <ChevronRight className="w-3.5 h-3.5 text-slate-400" />
-              )}
-              <CheckSquare className="w-3.5 h-3.5 text-amber-400" />
-              <span>Computed Output (default_value)</span>
-            </span>
-            <span className="text-[10px] font-mono text-amber-400">Result</span>
-          </button>
-
-          {openSections.output && (
-            <div className="bg-[#1e2228] divide-y divide-[#282c34]">
-              {qtoResult.mode === 'dual' ? (
-                <>
-                  {/* Concrete Volume */}
-                  <div className="grid grid-cols-12 items-center bg-amber-500/5">
-                    <label className="col-span-6 px-3 py-2 text-amber-200 border-r border-[#282c34] font-medium">
-                      concrete_volume
-                    </label>
-                    <div className="col-span-6 px-3 py-2 text-right font-mono font-bold text-amber-400 text-sm">
-                      {fmt(qtoResult.concrete_volume, 3)} m³
-                    </div>
-                  </div>
-                  {/* Steel Weight */}
-                  <div className="grid grid-cols-12 items-center bg-sky-500/5">
-                    <label className="col-span-6 px-3 py-2 text-sky-200 border-r border-[#282c34] font-medium">
-                      steel_weight
-                    </label>
-                    <div className="col-span-6 px-3 py-2 text-right font-mono font-bold text-sky-400 text-sm">
-                      {fmt(qtoResult.steel_weight, 2)} kg
-                    </div>
-                  </div>
-                </>
-              ) : (
-                <div className="grid grid-cols-12 items-center bg-emerald-500/5">
-                  <label className="col-span-6 px-3 py-2 text-emerald-200 border-r border-[#282c34] font-medium truncate">
-                    {qtoResult.primaryLabel}
-                  </label>
-                  <div className="col-span-6 px-3 py-2 text-right font-mono font-bold text-emerald-400 text-sm">
-                    {fmt(qtoResult.primaryValue, qtoCategory === 'count' ? 0 : 3)}{' '}
-                    {qtoResult.primaryUnit}
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* ====================================================================
-          4. COLLAPSIBLE BOQ SCHEDULE DRAWER
-      ==================================================================== */}
-      {showScheduleDrawer && (
-        <div className="bg-[#1b1e24] border-t border-slate-700 p-2.5 max-h-48 overflow-y-auto shrink-0">
-          <div className="flex items-center justify-between mb-1.5">
-            <span className="text-[11px] font-semibold text-amber-400 uppercase tracking-wider">
-              BOQ Schedule ({savedSchedule.length})
-            </span>
-            <div className="flex items-center gap-2">
-              {savedSchedule.length > 0 && (
-                <button
-                  onClick={() => setSavedSchedule([])}
-                  className="text-[10px] text-rose-400 hover:text-rose-300 flex items-center gap-0.5"
-                >
-                  <Trash2 className="w-3 h-3" />
-                  <span>Clear</span>
-                </button>
-              )}
-              <button
-                onClick={() => setShowScheduleDrawer(false)}
-                className="text-slate-400 hover:text-white text-xs"
-              >
-                <X className="w-3.5 h-3.5" />
-              </button>
+            {/* Category Quick Pills */}
+            <div className="flex items-center gap-1 overflow-x-auto pb-0.5">
+              {QUICK_CATEGORY_PILLS.map((pill) => {
+                const isActive = qtoCategory === pill.id;
+                const IconComp = pill.icon;
+                return (
+                  <button
+                    key={pill.id}
+                    onClick={() => handleCategorySelect(pill.id)}
+                    className={`px-2 py-1 rounded text-[10px] font-semibold transition-all flex items-center gap-1.5 whitespace-nowrap ${isActive
+                        ? 'bg-amber-500 text-slate-950 shadow-sm'
+                        : 'bg-[#282c34] text-slate-300 hover:bg-[#323842] hover:text-white'
+                      }`}
+                    title={`Set category to ${pill.label}`}
+                  >
+                    <IconComp className={`w-3.5 h-3.5 shrink-0 ${isActive ? 'text-slate-950' : 'text-sky-400'}`} />
+                    <span>{pill.label}</span>
+                  </button>
+                );
+              })}
             </div>
           </div>
-          {savedSchedule.length === 0 ? (
-            <p className="text-[11px] text-slate-400">
-              Belum ada item QTO yang direkam. Klik tombol &ldquo;Save Schedule&rdquo; di bawah.
-            </p>
-          ) : (
-            <table className="w-full text-left border-collapse text-[11px]">
-              <thead>
-                <tr className="border-b border-slate-700 text-slate-400">
-                  <th className="py-1 px-1.5">Location</th>
-                  <th className="py-1 px-1.5">Code</th>
-                  <th className="py-1 px-1.5">Cat</th>
-                  <th className="py-1 px-1.5 text-right">Result</th>
-                </tr>
-              </thead>
-              <tbody>
-                {savedSchedule.map((row) => (
-                  <tr key={row.id} className="border-b border-slate-800/80">
-                    <td className="py-1 px-1.5 text-slate-300 truncate max-w-[110px]">
-                      {row.floor} • {row.area || row.room}
-                    </td>
-                    <td className="py-1 px-1.5 font-mono text-amber-300">{row.code}</td>
-                    <td className="py-1 px-1.5 uppercase text-[10px]">{row.category}</td>
-                    <td className="py-1 px-1.5 text-right font-mono text-emerald-400 font-semibold">
-                      {row.result}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </div>
-      )}
 
-      {/* ====================================================================
+          {/* Status Banner when syncing with AutoCAD / GstarCAD */}
+          {syncStatusMsg && (
+            <div className="bg-sky-950/90 border-b border-sky-500/40 px-3 py-1 text-[11px] text-sky-200 flex items-center justify-between shrink-0">
+              <span>{syncStatusMsg}</span>
+              <button onClick={() => setSyncStatusMsg('')} className="text-sky-400 hover:text-white">
+                <X className="w-3 h-3" />
+              </button>
+            </div>
+          )}
+
+          {/* ====================================================================
+          3. SCROLLABLE 2-COLUMN AUTOCAD OPM PROPERTY GRID
+      ==================================================================== */}
+          <div className="flex-1 overflow-y-auto divide-y divide-[#181a1f] text-xs">
+            {/* ----------------------------------------------------------------
+            GROUP 1: LOCATION (Building, Floor, Room)
+        ---------------------------------------------------------------- */}
+            <div>
+              <button
+                onClick={() => toggleSection('location')}
+                className="w-full bg-[#2f3540] hover:bg-[#363d4a] px-3 py-1.5 flex items-center justify-between text-left font-semibold text-slate-200 transition-colors"
+              >
+                <span className="flex items-center gap-1.5">
+                  {openSections.location ? (
+                    <ChevronDown className="w-3.5 h-3.5 text-amber-400" />
+                  ) : (
+                    <ChevronRight className="w-3.5 h-3.5 text-slate-400" />
+                  )}
+                  <MapPin className="w-3.5 h-3.5 text-amber-400" />
+                  <span>Location</span>
+                </span>
+                <span className="text-[10px] font-mono text-slate-400">props.location</span>
+              </button>
+
+              {openSections.location && (
+                <div className="bg-[#1e2228] divide-y divide-[#282c34]">
+                  {/* Location */}
+                  <div className="grid grid-cols-12 items-center">
+                    <label className="col-span-5 px-3 py-1.5 text-slate-300 border-r border-[#282c34] truncate">
+                      Location
+                    </label>
+                    <div className="col-span-7 px-2 py-1">
+                      <input
+                        type="text"
+                        value={location.Location}
+                        placeholder={location.Location === '<Varies>' ? '<Varies>' : 'Enter location (e.g. Rumah)...'}
+                        onFocus={(e) => {
+                          if (e.target.value === '<Varies>') e.target.select();
+                        }}
+                        onChange={(e) =>
+                          setLocation((prev) => ({ ...prev, Location: e.target.value }))
+                        }
+                        className={`w-full bg-[#15181c] px-2 py-1 rounded border border-slate-700/80 focus:outline-none focus:border-amber-400 ${location.Location === '<Varies>' ? 'text-amber-400 font-mono italic text-[11px]' : 'text-slate-100'
+                          }`}
+                      />
+                    </div>
+                  </div>
+
+                  {/* Floor */}
+                  <div className="grid grid-cols-12 items-center">
+                    <label className="col-span-5 px-3 py-1.5 text-slate-300 border-r border-[#282c34] truncate">
+                      Floor
+                    </label>
+                    <div className="col-span-7 px-2 py-1">
+                      <input
+                        type="text"
+                        value={location.Floor}
+                        placeholder={location.Floor === '<Varies>' ? '<Varies>' : 'e.g. 1st Floor'}
+                        onFocus={(e) => {
+                          if (e.target.value === '<Varies>') e.target.select();
+                        }}
+                        onChange={(e) =>
+                          setLocation((prev) => ({ ...prev, Floor: e.target.value }))
+                        }
+                        className={`w-full bg-[#15181c] px-2 py-1 rounded border border-slate-700/80 focus:outline-none focus:border-amber-400 ${location.Floor === '<Varies>' ? 'text-amber-400 font-mono italic text-[11px]' : 'text-slate-100'
+                          }`}
+                      />
+                    </div>
+                  </div>
+
+                  {/* Area (Room) */}
+                  <div className="grid grid-cols-12 items-center">
+                    <label className="col-span-5 px-3 py-1.5 text-slate-300 border-r border-[#282c34] truncate">
+                      Area (Room)
+                    </label>
+                    <div className="col-span-7 px-2 py-1">
+                      <input
+                        type="text"
+                        value={location.Area}
+                        placeholder={location.Area === '<Varies>' ? '<Varies>' : 'e.g. Room'}
+                        onFocus={(e) => {
+                          if (e.target.value === '<Varies>') e.target.select();
+                        }}
+                        onChange={(e) =>
+                          setLocation((prev) => ({ ...prev, Area: e.target.value }))
+                        }
+                        className={`w-full bg-[#15181c] px-2 py-1 rounded border border-slate-700/80 focus:outline-none focus:border-amber-400 ${location.Area === '<Varies>' ? 'text-amber-400 font-mono italic text-[11px]' : 'text-slate-100'
+                          }`}
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* ----------------------------------------------------------------
+            GROUP 2: TYPES (Code, Category, Entity Type)
+        ---------------------------------------------------------------- */}
+            <div>
+              <button
+                onClick={() => toggleSection('types')}
+                className="w-full bg-[#2f3540] hover:bg-[#363d4a] px-3 py-1.5 flex items-center justify-between text-left font-semibold text-slate-200 transition-colors"
+              >
+                <span className="flex items-center gap-1.5">
+                  {openSections.types ? (
+                    <ChevronDown className="w-3.5 h-3.5 text-amber-400" />
+                  ) : (
+                    <ChevronRight className="w-3.5 h-3.5 text-slate-400" />
+                  )}
+                  <Box className="w-3.5 h-3.5 text-sky-400" />
+                  <span>Types</span>
+                </span>
+                <span className="text-[10px] font-mono text-slate-400">props.types</span>
+              </button>
+
+              {openSections.types && (
+                <div className="bg-[#1e2228] divide-y divide-[#282c34]">
+                  {/* Code & Description Button (Gambar 5) */}
+                  <div className="grid grid-cols-12 items-center">
+                    <label className="col-span-5 px-3 py-1.5 text-slate-300 border-r border-[#282c34] truncate">
+                      Code
+                    </label>
+                    <div className="col-span-7 px-2 py-1">
+                      <div className="flex items-center gap-1.5">
+                        <input
+                          type="text"
+                          value={qtoCode}
+                          placeholder={qtoCode === '<Varies>' ? '<Varies>' : 'Work item code (e.g. FloorFin/CT1)...'}
+                          onFocus={(e) => {
+                            if (e.target.value === '<Varies>') e.target.select();
+                          }}
+                          onChange={(e) => setQtoCode(e.target.value)}
+                          className={`flex-1 bg-[#15181c] font-mono px-2 py-1 rounded border border-slate-700/80 focus:outline-none focus:border-amber-400 ${
+                            qtoCode === '<Varies>' ? 'text-amber-400 italic text-[11px]' : 'text-amber-300'
+                          }`}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setDescModalCode(qtoCode === '<Varies>' ? '' : qtoCode);
+                            setShowDescModal(true);
+                          }}
+                          title="Buka / Edit Deskripsi Pekerjaan untuk kode ini (SQLite)"
+                          className="px-2 py-1 rounded bg-[#10141d] hover:bg-emerald-950/60 border border-slate-700/80 hover:border-emerald-500/50 text-slate-300 hover:text-emerald-300 text-[11px] font-medium flex items-center gap-1 transition-colors shrink-0"
+                        >
+                          <span>📝</span>
+                          <span>Desc</span>
+                        </button>
+                      </div>
+                      {descriptions[qtoCode.trim()]?.short && (
+                        <div className="mt-1 text-[11px] text-emerald-400 font-sans truncate flex items-center gap-1">
+                          <span className="opacity-70">↳</span>
+                          <span>{descriptions[qtoCode.trim()].short}</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Category */}
+                  <div className="grid grid-cols-12 items-center">
+                    <label className="col-span-5 px-3 py-1.5 text-slate-300 border-r border-[#282c34] truncate">
+                      Category
+                    </label>
+                    <div className="col-span-7 px-2 py-1">
+                      <select
+                        value={qtoCategory}
+                        onChange={(e) => handleCategorySelect(e.target.value)}
+                        className={`w-full bg-[#15181c] px-2 py-1 rounded border border-slate-700/80 focus:outline-none focus:border-amber-400 font-medium ${qtoCategory === '<Varies>' ? 'text-amber-400 italic' : 'text-slate-100'
+                          }`}
+                      >
+                        {qtoCategory === '<Varies>' && (
+                          <option value="<Varies>">&lt;Varies&gt; (Multiple Categories)</option>
+                        )}
+                        <option value="length">length</option>
+                        <option value="area">area</option>
+                        <option value="wall">wall</option>
+                        <option value="count">count</option>
+                        <option value="weight">weight</option>
+                        <option value="beam">beam</option>
+                        <option value="column">column</option>
+                        <option value="slab">slab</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  {/* Entity Type selector (specifically needed when Category == weight) */}
+                  {qtoCategory === 'weight' && (
+                    <div className="grid grid-cols-12 items-center bg-pink-500/5">
+                      <label className="col-span-5 px-3 py-1.5 text-pink-300 border-r border-[#282c34] truncate">
+                        entity_type
+                      </label>
+                      <div className="col-span-7 px-2 py-1">
+                        <select
+                          value={weightEntityType}
+                          onChange={(e) => setWeightEntityType(e.target.value)}
+                          className="w-full bg-[#15181c] text-pink-200 px-2 py-1 rounded border border-pink-500/40 focus:outline-none"
+                        >
+                          <option value="line">line (length × xdata: wpl)</option>
+                          <option value="surface">surface (area × xdata: wpa)</option>
+                        </select>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Formula Rule Preview */}
+                  <div className="grid grid-cols-12 items-center">
+                    <label className="col-span-5 px-3 py-1.5 text-slate-400 border-r border-[#282c34] truncate">
+                      Rule
+                    </label>
+                    <div
+                      className="col-span-7 px-2.5 py-1.5 text-[11px] font-mono text-slate-400 truncate"
+                      title={activeCategoryConfig.formulaLabel}
+                    >
+                      {activeCategoryConfig.formulaLabel}
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* ----------------------------------------------------------------
+            GROUP 3: EXTENDED ENTITY DATA (XDATA PARAMETERS)
+        ---------------------------------------------------------------- */}
+            <div>
+              <button
+                onClick={() => toggleSection('xdata')}
+                className="w-full bg-[#2f3540] hover:bg-[#363d4a] px-3 py-1.5 flex items-center justify-between text-left font-semibold text-slate-200 transition-colors"
+              >
+                <span className="flex items-center gap-1.5">
+                  {openSections.xdata ? (
+                    <ChevronDown className="w-3.5 h-3.5 text-amber-400" />
+                  ) : (
+                    <ChevronRight className="w-3.5 h-3.5 text-slate-400" />
+                  )}
+                  <Database className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>XData Parameters (xdata)</span>
+                </span>
+                <span className="text-[10px] font-mono text-emerald-400">
+                  {activeXdataFields.length > 0
+                    ? activeXdataFields.map((f) => f.key).join(', ')
+                    : 'direct'}
+                </span>
+              </button>
+
+              {openSections.xdata && (
+                <div className="bg-[#1e2228] divide-y divide-[#282c34]">
+                  {activeXdataFields.length === 0 ? (
+                    <div className="px-3 py-2 text-slate-400 text-[11px]">
+                      Kategori <strong className="text-slate-200">{qtoCategory}</strong> menghitung
+                      langsung geometri objek CAD (<code className="text-sky-400">quantities</code>)
+                      tanpa parameter pengali XData tambahan.
+                    </div>
+                  ) : (
+                    <>
+                      {/* Evaluation Mode Toggle */}
+                      <div className="grid grid-cols-12 items-center bg-[#181b20]">
+                        <label className="col-span-5 px-3 py-1.5 text-slate-400 border-r border-[#282c34] text-[11px]">
+                          XData Scope
+                        </label>
+                        <div className="col-span-7 px-2 py-1 flex gap-1">
+                          <button
+                            onClick={() => setXdataMode('uniform')}
+                            className={`flex-1 py-0.5 rounded text-[11px] font-medium ${xdataMode === 'uniform'
+                                ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
+                                : 'bg-slate-800 text-slate-400'
+                              }`}
+                          >
+                            Uniform
+                          </button>
+                          <button
+                            onClick={() => setXdataMode('per_entity')}
+                            className={`flex-1 py-0.5 rounded text-[11px] font-medium ${xdataMode === 'per_entity'
+                                ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
+                                : 'bg-slate-800 text-slate-400'
+                              }`}
+                          >
+                            Per-Entity
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Dynamic XData Fields */}
+                      {activeXdataFields.map((field) => (
+                        <div key={field.key} className="grid grid-cols-12 items-center">
+                          <label className="col-span-6 px-3 py-1.5 text-slate-300 border-r border-[#282c34] flex items-center justify-between gap-1">
+                            <span className="truncate" title={field.label}>
+                              {field.label}
+                            </span>
+                            <span className="text-[10px] font-mono text-emerald-400 bg-emerald-950/60 px-1 rounded shrink-0">
+                              {field.key}
+                            </span>
+                          </label>
+                          <div className="col-span-6 px-2 py-1 flex items-center gap-1.5">
+                            <UsNumberInput
+                              step={field.step}
+                              value={globalXdata[field.key]}
+                              onChange={(val) => handleGlobalXdataChange(field.key, val)}
+                              className="w-full bg-[#15181c] text-emerald-300 font-mono px-2 py-1 rounded border border-slate-700/80 focus:outline-none focus:border-emerald-400 text-right text-xs"
+                            />
+                            <span className="text-[11px] text-slate-400 w-10 shrink-0 font-mono">
+                              {field.unit}
+                            </span>
+                          </div>
+                        </div>
+                      ))}
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* ----------------------------------------------------------------
+            GROUP 4: QUANTITIES / FACTORS (Product of Values)
+        ---------------------------------------------------------------- */}
+            <div>
+              <button
+                onClick={() => toggleSection('quantities')}
+                className="w-full bg-[#2f3540] hover:bg-[#363d4a] px-3 py-1.5 flex items-center justify-between text-left font-semibold text-slate-200 transition-colors"
+              >
+                <span className="flex items-center gap-1.5">
+                  {openSections.quantities ? (
+                    <ChevronDown className="w-3.5 h-3.5 text-amber-400" />
+                  ) : (
+                    <ChevronRight className="w-3.5 h-3.5 text-slate-400" />
+                  )}
+                  <Calculator className="w-3.5 h-3.5 text-purple-400" />
+                  <span>Quantities ([number])</span>
+                </span>
+                <span className="text-[10px] font-mono text-amber-300 truncate max-w-[190px]">
+                  [{qtyFactorsArray.join(', ')}] = {fmt(factorProduct, 2)}x
+                </span>
+              </button>
+
+              {openSections.quantities && (
+                <div className="bg-[#1e2228] p-2 space-y-2">
+                  {/* Base CAD Geometry summary header */}
+                  <div className="flex items-center justify-between text-[11px] bg-[#17191e] px-2.5 py-1.5 rounded border border-slate-800">
+                    <span className="text-slate-400">
+                      Base Geometry:{' '}
+                      <strong className="text-slate-100 font-mono">
+                        {fmt(qtoResult.sumProductBase, 3)} {activeCategoryConfig.baseUnit}
+                      </strong>
+                      {selectedEntities.length > 0 && (
+                        <span className="text-[10px] text-slate-500 ml-1.5">
+                          ({selectedEntities.length} obj{selectedEntities.length > 1 ? 's' : ''})
+                        </span>
+                      )}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={handleAddFactorRow}
+                      className="text-amber-400 hover:text-amber-300 flex items-center gap-1 text-[11px] font-semibold bg-amber-400/10 hover:bg-amber-400/20 px-2 py-0.5 rounded transition-colors"
+                      title="Add factor row (e.g. nr, margin, overhead)"
+                    >
+                      <Plus className="w-3 h-3" />
+                      <span>Add Row</span>
+                    </button>
+                  </div>
+
+                  {/* Factors List (nr, margin, overhead, etc.) */}
+                  <div className="divide-y divide-slate-800 border border-slate-800 rounded bg-[#15181c] overflow-hidden">
+                    {factors.map((f, idx) => (
+                      <div key={f.id} className="px-2.5 py-1.5 flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-1.5 flex-1 min-w-0">
+                          <span className="text-slate-500 text-[10px] font-mono w-3.5 text-center">
+                            {idx + 1}.
+                          </span>
+                          <input
+                            type="text"
+                            value={f.name}
+                            onChange={(e) => handleUpdateFactor(f.id, 'name', e.target.value)}
+                            placeholder="factor name (e.g. nr, margin)"
+                            className="flex-1 min-w-[70px] bg-[#1e2229] font-mono text-slate-200 text-xs px-2 py-1 rounded border border-slate-700 focus:outline-none focus:border-amber-400"
+                          />
+                        </div>
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          <span className="text-slate-500 text-xs font-mono">×</span>
+                          <div className="w-20">
+                            <UsNumberInput
+                              step={0.05}
+                              value={f.value}
+                              onChange={(val) => handleUpdateFactor(f.id, 'value', val)}
+                              className="w-full bg-[#1e2229] text-right font-mono text-amber-300 text-xs px-2 py-1 rounded border border-slate-700 focus:outline-none focus:border-amber-400"
+                              title={`Factor value for ${f.name}`}
+                            />
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveFactorRow(f.id)}
+                            disabled={factors.length <= 1}
+                            title={factors.length <= 1 ? 'Minimum 1 factor required' : `Delete ${f.name}`}
+                            className={`p-1 rounded text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 transition-colors ${factors.length <= 1 ? 'opacity-30 cursor-not-allowed' : ''
+                              }`}
+                          >
+                            <Trash2 className="w-3 h-3" />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+
+                    {/* Factors product calculation summary */}
+                    <div className="bg-[#191c22] px-2.5 py-1.5 flex items-center justify-between text-[11px] text-slate-400 border-t border-slate-800">
+                      <span className="truncate max-w-[210px] text-slate-400 text-[10px] font-mono">
+                        Factor Product ({factors.map((f) => f.name || '?').join(' × ')}):
+                      </span>
+                      <span className="font-mono text-amber-300 font-bold text-xs">
+                        {fmt(factorProduct, 3)}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* ----------------------------------------------------------------
+            GROUP 5: COMPUTED OUTPUT (default_value)
+        ---------------------------------------------------------------- */}
+            <div>
+              <button
+                onClick={() => toggleSection('output')}
+                className="w-full bg-[#2f3540] hover:bg-[#363d4a] px-3 py-1.5 flex items-center justify-between text-left font-semibold text-slate-200 transition-colors"
+              >
+                <span className="flex items-center gap-1.5">
+                  {openSections.output ? (
+                    <ChevronDown className="w-3.5 h-3.5 text-amber-400" />
+                  ) : (
+                    <ChevronRight className="w-3.5 h-3.5 text-slate-400" />
+                  )}
+                  <CheckSquare className="w-3.5 h-3.5 text-amber-400" />
+                  <span>Computed Output (default_value)</span>
+                </span>
+                <span className="text-[10px] font-mono text-amber-400">Result</span>
+              </button>
+
+              {openSections.output && (
+                <div className="bg-[#1e2228] divide-y divide-[#282c34]">
+                  {qtoResult.mode === 'dual' ? (
+                    <>
+                      {/* Concrete Volume */}
+                      <div className="grid grid-cols-12 items-center bg-amber-500/5">
+                        <label className="col-span-6 px-3 py-2 text-amber-200 border-r border-[#282c34] font-medium">
+                          concrete_volume
+                        </label>
+                        <div className="col-span-6 px-3 py-2 text-right font-mono font-bold text-amber-400 text-sm">
+                          {fmt(qtoResult.concrete_volume, 3)} m³
+                        </div>
+                      </div>
+                      {/* Steel Weight */}
+                      <div className="grid grid-cols-12 items-center bg-sky-500/5">
+                        <label className="col-span-6 px-3 py-2 text-sky-200 border-r border-[#282c34] font-medium">
+                          steel_weight
+                        </label>
+                        <div className="col-span-6 px-3 py-2 text-right font-mono font-bold text-sky-400 text-sm">
+                          {fmt(qtoResult.steel_weight, 2)} kg
+                        </div>
+                      </div>
+                    </>
+                  ) : (
+                    <div className="grid grid-cols-12 items-center bg-emerald-500/5">
+                      <label className="col-span-6 px-3 py-2 text-emerald-200 border-r border-[#282c34] font-medium truncate">
+                        {qtoResult.primaryLabel}
+                      </label>
+                      <div className="col-span-6 px-3 py-2 text-right font-mono font-bold text-emerald-400 text-sm">
+                        {fmt(qtoResult.primaryValue, qtoCategory === 'count' ? 0 : 3)}{' '}
+                        {qtoResult.primaryUnit}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* ====================================================================
+          4. COLLAPSIBLE BOQ SCHEDULE DRAWER
+      ==================================================================== */}
+          {showScheduleDrawer && (
+            <div className="bg-[#1b1e24] border-t border-slate-700 p-2.5 max-h-48 overflow-y-auto shrink-0">
+              <div className="flex items-center justify-between mb-1.5">
+                <span className="text-[11px] font-semibold text-amber-400 uppercase tracking-wider">
+                  BOQ Schedule ({savedSchedule.length})
+                </span>
+                <div className="flex items-center gap-2">
+                  {savedSchedule.length > 0 && (
+                    <button
+                      onClick={() => setSavedSchedule([])}
+                      className="text-[10px] text-rose-400 hover:text-rose-300 flex items-center gap-0.5"
+                    >
+                      <Trash2 className="w-3 h-3" />
+                      <span>Clear</span>
+                    </button>
+                  )}
+                  <button
+                    onClick={() => setShowScheduleDrawer(false)}
+                    className="text-slate-400 hover:text-white text-xs"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </div>
+              {savedSchedule.length === 0 ? (
+                <p className="text-[11px] text-slate-400">
+                  Belum ada item QTO yang direkam. Klik tombol &ldquo;Save Schedule&rdquo; di bawah.
+                </p>
+              ) : (
+                <table className="w-full text-left border-collapse text-[11px]">
+                  <thead>
+                    <tr className="border-b border-slate-700 text-slate-400">
+                      <th className="py-1 px-1.5">Location</th>
+                      <th className="py-1 px-1.5">Code</th>
+                      <th className="py-1 px-1.5">Cat</th>
+                      <th className="py-1 px-1.5 text-right">Result</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {savedSchedule.map((row) => (
+                      <tr key={row.id} className="border-b border-slate-800/80">
+                        <td className="py-1 px-1.5 text-slate-300 truncate max-w-[110px]">
+                          {row.floor} • {row.area || row.room}
+                        </td>
+                        <td className="py-1 px-1.5 font-mono text-amber-300">{row.code}</td>
+                        <td className="py-1 px-1.5 uppercase text-[10px]">{row.category}</td>
+                        <td className="py-1 px-1.5 text-right font-mono text-emerald-400 font-semibold">
+                          {row.result}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          )}
+
+          {/* ====================================================================
           5. BOTTOM SUMMARY & CAD XDATA ACTION FOOTER
       ==================================================================== */}
-      <footer className="p-2.5 bg-[#1c1f24] border-t border-[#111317] flex items-center justify-between gap-2 shrink-0">
-        <label className="flex items-center gap-1.5 text-[11px] text-slate-300 cursor-pointer">
-          <input
-            type="checkbox"
-            checked={autoWriteXdata}
-            onChange={(e) => setAutoWriteXdata(e.target.checked)}
-            className="rounded border-slate-600 bg-slate-800 text-amber-500 focus:ring-0"
-          />
-          <span>Auto-Write XData</span>
-        </label>
+          <footer className="p-2.5 bg-[#1c1f24] border-t border-[#111317] flex items-center justify-between gap-2 shrink-0">
+            <label className="flex items-center gap-1.5 text-[11px] text-slate-300 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={autoWriteXdata}
+                onChange={(e) => setAutoWriteXdata(e.target.checked)}
+                className="rounded border-slate-600 bg-slate-800 text-amber-500 focus:ring-0"
+              />
+              <span>Auto-Write XData</span>
+            </label>
 
-        <div className="flex items-center gap-1.5">
-          <button
-            onClick={handleApplyXdataToCad}
-            title="Write Location, Code, Category & XData to selected AutoCAD / GstarCAD objects (Shortcut: F5)"
-            className="px-2.5 py-1.5 rounded bg-sky-600 hover:bg-sky-500 text-white font-semibold text-xs flex items-center gap-1 shadow transition-colors"
-          >
-            <UploadCloud className="w-3.5 h-3.5" />
-            <span>Apply XData</span>
-            <kbd className="ml-0.5 px-1 py-0.5 text-[9px] leading-none bg-sky-800/80 text-sky-200 rounded border border-sky-400/40 font-mono font-semibold">F5</kbd>
-          </button>
+            <div className="flex items-center gap-1.5">
+              <button
+                onClick={handleApplyXdataToCad}
+                title="Write Location, Code, Category & XData to selected AutoCAD / GstarCAD objects (Shortcut: F5)"
+                className="px-2.5 py-1.5 rounded bg-sky-600 hover:bg-sky-500 text-white font-semibold text-xs flex items-center gap-1 shadow transition-colors"
+              >
+                <UploadCloud className="w-3.5 h-3.5" />
+                <span>Apply XData</span>
+                <kbd className="ml-0.5 px-1 py-0.5 text-[9px] leading-none bg-sky-800/80 text-sky-200 rounded border border-sky-400/40 font-mono font-semibold">F5</kbd>
+              </button>
 
-          <button
-            onClick={handleRecordSchedule}
-            className="px-2.5 py-1.5 rounded bg-amber-500 hover:bg-amber-400 text-slate-950 font-semibold text-xs flex items-center gap-1 shadow transition-colors"
-          >
-            <Check className="w-3.5 h-3.5" />
-            <span>Save Schedule</span>
-          </button>
-        </div>
-      </footer>
+              <button
+                onClick={handleRecordSchedule}
+                className="px-2.5 py-1.5 rounded bg-amber-500 hover:bg-amber-400 text-slate-950 font-semibold text-xs flex items-center gap-1 shadow transition-colors"
+              >
+                <Check className="w-3.5 h-3.5" />
+                <span>Save Schedule</span>
+              </button>
+            </div>
+          </footer>
+        </>
+      )}
 
       {/* ====================================================================
           6. LIVE JSON SCHEMA MODAL
@@ -2519,6 +2659,17 @@ export default function App() {
           </div>
         </div>
       )}
+
+      {/* Description Modal (Gambar 5) */}
+      <DescriptionModal
+        isOpen={showDescModal}
+        onClose={() => setShowDescModal(false)}
+        initialCode={descModalCode}
+        descriptions={descriptions}
+        onSaveDescription={handleSaveDescription}
+        onDeleteDescription={handleDeleteDescription}
+        cadConnected={cadConnected}
+      />
     </div>
   );
 }

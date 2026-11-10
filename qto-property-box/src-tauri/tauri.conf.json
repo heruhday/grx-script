@@ -12,9 +12,9 @@
     "windows": [
       {
         "title": "QTO Property Box",
-        "width": 450,
+        "width": 560,
         "height": 780,
-        "minWidth": 370,
+        "minWidth": 400,
         "minHeight": 500,
         "resizable": true,
         "alwaysOnTop": true

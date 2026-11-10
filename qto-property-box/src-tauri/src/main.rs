@@ -11,16 +11,17 @@ const DEFAULT_IPC_PORT: u16 = 8123;
 /// Evaluates a JavaScript snippet inside AutoCAD or GstarCAD via the grx-script TCP IPC server
 fn eval_in_cad_ipc(port: u16, script: &str) -> Result<Value, String> {
     let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), port);
-    let mut stream = TcpStream::connect_timeout(&addr, Duration::from_millis(350))
+    let mut stream = TcpStream::connect_timeout(&addr, Duration::from_millis(1000))
         .map_err(|e| format!("CAD IPC not connected (127.0.0.1:{}): {}", port, e))?;
 
-    let _ = stream.set_read_timeout(Some(Duration::from_millis(3000)));
-    let _ = stream.set_write_timeout(Some(Duration::from_millis(1500)));
+    let _ = stream.set_read_timeout(Some(Duration::from_millis(25000)));
+    let _ = stream.set_write_timeout(Some(Duration::from_millis(5000)));
 
     stream
         .write_all(script.as_bytes())
         .map_err(|e| format!("Failed to send script to CAD IPC: {}", e))?;
     let _ = stream.flush();
+    let _ = stream.shutdown(std::net::Shutdown::Write);
 
     let mut response = String::new();
     stream
@@ -82,12 +83,174 @@ fn cad_apply_qto_xdata(patches: Vec<EntityXdataPatch>, port: Option<u16>) -> Res
             const updated = []; \
             for (const item of items) {{ \
                 entity.set(item.handle, {{ data: null }}); \
-                const res = entity.set(item.handle, {{ data: item.data }}); \
-                if (res) updated.push(res.hand || item.handle); \
+                entity.set(item.handle, {{ data: item.data }}); \
+                updated.push(item.handle); \
             }} \
             return {{ ok: true, count: updated.length, handles: updated }}; \
         }})()",
         patches_json
+    );
+    eval_in_cad_ipc(port.unwrap_or(DEFAULT_IPC_PORT), &js)
+}
+
+#[tauri::command]
+fn cad_filter_entities_color(
+    checked_handles: Vec<String>,
+    all_handles: Vec<String>,
+    is_filter_on: bool,
+    port: Option<u16>,
+) -> Result<Value, String> {
+    let checked_json = serde_json::to_string(&checked_handles).unwrap_or_else(|_| "[]".to_string());
+    let all_json = serde_json::to_string(&all_handles).unwrap_or_else(|_| "[]".to_string());
+    let is_on = if is_filter_on { "true" } else { "false" };
+
+    let js = format!(
+        "(() => {{ \
+            const checked = new Set({}); \
+            const all = {}; \
+            const filterOn = {}; \
+            const darkGrey = 8; \
+            let dimmed = 0; \
+            let restored = 0; \
+            for (const h of all) {{ \
+                const ent = entity.get(h); \
+                if (!ent) continue; \
+                if (!filterOn) {{ \
+                    if (ent.data && ent.data._clr !== undefined && ent.data._clr !== null) {{ \
+                        entity.set(h, {{ clr: ent.data._clr, data: {{ _clr: null }} }}); \
+                        restored++; \
+                    }} \
+                }} else if (checked.has(h)) {{ \
+                    if (ent.data && ent.data._clr !== undefined && ent.data._clr !== null) {{ \
+                        entity.set(h, {{ clr: ent.data._clr, data: {{ _clr: null }} }}); \
+                        restored++; \
+                    }} \
+                }} else {{ \
+                    const origClr = (ent.data && ent.data._clr !== undefined && ent.data._clr !== null) ? ent.data._clr : ent.clr; \
+                    entity.set(h, {{ clr: darkGrey, data: {{ _clr: origClr }} }}); \
+                    dimmed++; \
+                }} \
+            }} \
+            return {{ ok: true, dimmed, restored }}; \
+        }})()",
+        checked_json, all_json, is_on
+    );
+
+    eval_in_cad_ipc(port.unwrap_or(DEFAULT_IPC_PORT), &js)
+}
+
+#[tauri::command]
+fn cad_run_ss_query(
+    query: String,
+    handles: Option<Vec<String>>,
+    port: Option<u16>,
+) -> Result<Value, String> {
+    let js = match handles {
+        Some(ref h_list) if !h_list.is_empty() => {
+            format!(
+                "editor.ssQuery({{ handles: {}, query: {} }})",
+                serde_json::to_string(h_list).unwrap_or_else(|_| "[]".to_string()),
+                serde_json::to_string(&query).unwrap_or_default()
+            )
+        }
+        _ => {
+            format!(
+                "editor.ssQuery({})",
+                serde_json::to_string(&query).unwrap_or_default()
+            )
+        }
+    };
+    eval_in_cad_ipc(port.unwrap_or(DEFAULT_IPC_PORT), &js)
+}
+
+#[tauri::command]
+fn cad_get_descriptions(port: Option<u16>) -> Result<Value, String> {
+    let js = r#"(() => {
+        try {
+            const { DatabaseSync } = require('sqlite');
+            const dbPath = 'C:/Users/Heruh/source/arx-script/grx-script/qto_descriptions.db';
+            const db = new DatabaseSync(dbPath);
+            db.exec(`CREATE TABLE IF NOT EXISTS deskripsi (
+                code TEXT PRIMARY KEY,
+                items TEXT,
+                short TEXT,
+                full TEXT
+            );`);
+            const rows = db.prepare('SELECT * FROM deskripsi').all();
+            const map = {};
+            for (const r of rows) {
+                let itemsArr = [];
+                try {
+                    itemsArr = JSON.parse(r.items);
+                } catch {
+                    itemsArr = r.items ? [r.items] : [];
+                }
+                map[r.code] = {
+                    items: itemsArr,
+                    short: r.short || '',
+                    full: r.full || ''
+                };
+            }
+            return map;
+        } catch (e) {
+            return { error: String(e) };
+        }
+    })()"#;
+    eval_in_cad_ipc(port.unwrap_or(DEFAULT_IPC_PORT), js)
+}
+
+#[tauri::command]
+fn cad_save_description(
+    code: String,
+    items: Vec<String>,
+    short: String,
+    full: String,
+    port: Option<u16>,
+) -> Result<Value, String> {
+    let items_json = serde_json::to_string(&items).unwrap_or_else(|_| "[]".to_string());
+    let js = format!(
+        r#"(() => {{
+            try {{
+                const {{ DatabaseSync }} = require('sqlite');
+                const dbPath = 'C:/Users/Heruh/source/arx-script/grx-script/qto_descriptions.db';
+                const db = new DatabaseSync(dbPath);
+                db.exec(`CREATE TABLE IF NOT EXISTS deskripsi (
+                    code TEXT PRIMARY KEY,
+                    items TEXT,
+                    short TEXT,
+                    full TEXT
+                );`);
+                const stmt = db.prepare('INSERT OR REPLACE INTO deskripsi (code, items, short, full) VALUES (?, ?, ?, ?)');
+                stmt.run({}, {}, {}, {});
+                return {{ ok: true }};
+            }} catch (e) {{
+                return {{ error: String(e) }};
+            }}
+        }})()"#,
+        serde_json::to_string(&code).unwrap(),
+        serde_json::to_string(&items_json).unwrap(),
+        serde_json::to_string(&short).unwrap(),
+        serde_json::to_string(&full).unwrap()
+    );
+    eval_in_cad_ipc(port.unwrap_or(DEFAULT_IPC_PORT), &js)
+}
+
+#[tauri::command]
+fn cad_delete_description(code: String, port: Option<u16>) -> Result<Value, String> {
+    let js = format!(
+        r#"(() => {{
+            try {{
+                const {{ DatabaseSync }} = require('sqlite');
+                const dbPath = 'C:/Users/Heruh/source/arx-script/grx-script/qto_descriptions.db';
+                const db = new DatabaseSync(dbPath);
+                const stmt = db.prepare('DELETE FROM deskripsi WHERE code = ?');
+                stmt.run({});
+                return {{ ok: true }};
+            }} catch (e) {{
+                return {{ error: String(e) }};
+            }}
+        }})()"#,
+        serde_json::to_string(&code).unwrap()
     );
     eval_in_cad_ipc(port.unwrap_or(DEFAULT_IPC_PORT), &js)
 }
@@ -109,7 +272,7 @@ fn main() {
                 None => "Box<Any>".to_string(),
             },
         };
-        let _ = std::fs::write("C:\\Users\\qsten\\OneDrive - PT. Roket Jaya Abadi\\Heru\\temp\\grx-script\\qto_crash.log", format!("Panic at {:?}: {}", info.location(), msg));
+        let _ = std::fs::write("qto_crash.log", format!("Panic at {:?}: {}", info.location(), msg));
     }));
     if let Err(e) = tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
@@ -118,9 +281,14 @@ fn main() {
             cad_select_layer,
             cad_select_handles,
             cad_apply_qto_xdata,
+            cad_filter_entities_color,
+            cad_run_ss_query,
+            cad_get_descriptions,
+            cad_save_description,
+            cad_delete_description,
             set_always_on_top
         ])
         .run(tauri::generate_context!()) {
-        let _ = std::fs::write("C:\\Users\\qsten\\OneDrive - PT. Roket Jaya Abadi\\Heru\\temp\\grx-script\\qto_crash.log", format!("Builder error: {:?}", e));
+        let _ = std::fs::write("qto_crash.log", format!("Builder error: {:?}", e));
     }
 }
