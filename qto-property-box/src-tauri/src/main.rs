@@ -148,8 +148,7 @@ fn cad_run_ss_query(
     let js = match handles {
         Some(ref h_list) if !h_list.is_empty() => {
             format!(
-                "editor.ssQuery({{ entities: {}, handles: {}, query: {} }})",
-                serde_json::to_string(h_list).unwrap_or_else(|_| "[]".to_string()),
+                "editor.ssQuery({{ entities: {}, query: {} }})",
                 serde_json::to_string(h_list).unwrap_or_else(|_| "[]".to_string()),
                 serde_json::to_string(&query).unwrap_or_default()
             )
