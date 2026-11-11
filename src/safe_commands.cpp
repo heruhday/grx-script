@@ -2915,18 +2915,22 @@ namespace safe_commands
         JSValue handlesArr = JS_NewArray(context);
         JSValue entitiesArr = JS_NewArray(context);
         uint32_t entIdx = 0;
+        const size_t maxFullEntities = 250; // Cap full property extraction to prevent CAD lockup on massive selections
 
         for (size_t i = 0; i < handles.size(); ++i)
         {
             JS_SetPropertyUint32(context, handlesArr, static_cast<uint32_t>(i), JS_NewString(context, handles[i].c_str()));
-            JSValue entObj = callEntityGet(context, handles[i]);
-            if (!JS_IsException(entObj) && !JS_IsNull(entObj) && !JS_IsUndefined(entObj))
+            if (i < maxFullEntities)
             {
-                JS_SetPropertyUint32(context, entitiesArr, entIdx++, entObj);
-            }
-            else
-            {
-                JS_FreeValue(context, entObj);
+                JSValue entObj = callEntityGet(context, handles[i]);
+                if (!JS_IsException(entObj) && !JS_IsNull(entObj) && !JS_IsUndefined(entObj))
+                {
+                    JS_SetPropertyUint32(context, entitiesArr, entIdx++, entObj);
+                }
+                else
+                {
+                    JS_FreeValue(context, entObj);
+                }
             }
         }
 

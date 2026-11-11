@@ -1203,10 +1203,8 @@ export default function App() {
     };
 
     pollCad();
-    const timer = setInterval(pollCad, 800);
     return () => {
       active = false;
-      clearInterval(timer);
     };
   }, [ipcPort]);
 
@@ -1920,10 +1918,11 @@ export default function App() {
 
               <button
                 onClick={handleManualRefresh}
-                title="Refresh Selection from AutoCAD / GstarCAD"
-                className="p-1.5 rounded bg-[#2c313a] hover:bg-[#353b45] border border-slate-700 text-slate-300 transition-colors"
+                title="Ambil seleksi objek saat ini dari AutoCAD / GstarCAD"
+                className="flex items-center gap-1 px-2 py-1 rounded bg-[#2c313a] hover:bg-[#353b45] border border-slate-700 text-slate-200 text-xs font-semibold transition-colors"
               >
-                <RefreshCw className="w-3.5 h-3.5" />
+                <Crosshair className="w-3.5 h-3.5 text-amber-400" />
+                <span>Pick Selection</span>
               </button>
 
               <button

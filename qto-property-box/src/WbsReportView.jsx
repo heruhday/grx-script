@@ -235,7 +235,7 @@ export default function WbsReportView({
     return q ? q.dsl : DEFAULT_SAVED_DSL_QUERIES[0].dsl;
   }, [savedQueries, activeQueryId]);
 
-  // Execute SS-QUERY in CAD and build TreeView from result
+  // Execute SS-QUERY in CAD and build TreeView from result (Manual / On-Demand ONLY)
   const executeQueryAndBuildTree = useCallback(
     async (dslOverride, scopeOverride) => {
       const dsl = (dslOverride || currentDslQuery).trim();
@@ -245,12 +245,28 @@ export default function WbsReportView({
       setIsLoading(true);
       setStatusMsg('Mengevaluasi SS-QUERY di CAD...');
 
-      // Handles for selection scope
+      // Handles for selection scope: fetched ON-DEMAND when user clicks "Pick Selection"
       let targetHandles = null;
       if (scope === 'selection') {
-        targetHandles = selectedEntities.map((e) => e.handle).filter(Boolean);
-        if (targetHandles.length === 0) {
-          setStatusMsg('0 entitas dipilih di CAD (pilih objek di CAD atau ganti ke All)');
+        if (cadConnected) {
+          try {
+            const pollRes = await invoke('cad_poll_selection', {
+              lastVersion: 0,
+              port: ipcPort
+            });
+            if (pollRes && pollRes.handles && pollRes.handles.length > 0) {
+              targetHandles = pollRes.handles;
+            }
+          } catch (e) {
+            console.warn('Failed to poll selection on demand:', e);
+          }
+        }
+        if (!targetHandles || targetHandles.length === 0) {
+          targetHandles = selectedEntities.map((e) => e.handle).filter(Boolean);
+        }
+        if (!targetHandles || targetHandles.length === 0) {
+          alert('Belum ada objek yang dipilih di CAD. Silakan pilih objek di AutoCAD / GstarCAD, lalu klik tombol "Pick Selection".');
+          setStatusMsg('0 objek dipilih di CAD');
           setIsLoading(false);
           setTimeout(() => setStatusMsg(''), 3000);
           return;
@@ -300,7 +316,8 @@ export default function WbsReportView({
             setExpandedNodes(new Set(allIds));
             const qNodes = getQuantityNodes(nodes);
             setCheckedNodeIds(new Set(qNodes.map((n) => n.id)));
-            setStatusMsg(`Tree di-generate dari hasil SS-QUERY (${qNodes.length} item)`);
+            const scopeLabel = scope === 'selection' ? `Seleksi (${targetHandles?.length || 0} obj)` : 'Seluruh Gambar';
+            setStatusMsg(`Sukses: ${scopeLabel} • ${qNodes.length} item kuantitas`);
           } else {
             setStatusMsg('Hasil query kosong');
           }
@@ -323,13 +340,25 @@ export default function WbsReportView({
       setIsLoading(false);
       setTimeout(() => setStatusMsg(''), 3000);
     },
-    [currentDslQuery, queryScope, cadConnected, selectedEntities, ipcPort, descriptions]
+    [currentDslQuery, queryScope, cadConnected, ipcPort, descriptions]
   );
 
-  // Auto-run query on mount or when queryScope / activeQueryId changes
+  // Manual trigger for Pick Selection button
+  const handlePickSelection = async () => {
+    setQueryScope('selection');
+    await executeQueryAndBuildTree(currentDslQuery, 'selection');
+  };
+
+  // Manual trigger for All Entities button
+  const handleQueryAll = async () => {
+    setQueryScope('all');
+    await executeQueryAndBuildTree(currentDslQuery, 'all');
+  };
+
+  // Run query once on mount or when activeQueryId changes (NEVER on realtime selection!)
   useEffect(() => {
-    executeQueryAndBuildTree();
-  }, [activeQueryId, queryScope, executeQueryAndBuildTree]);
+    executeQueryAndBuildTree(currentDslQuery, queryScope);
+  }, [activeQueryId]);
 
   // CAD Visual Filter: Dark Grey (ACI 8) for unchecked entities, restore original _clr when OFF
   useEffect(() => {
@@ -735,29 +764,32 @@ export default function WbsReportView({
             <ChevronDown className="w-3.5 h-3.5 text-slate-400 absolute right-2 top-2 pointer-events-none" />
           </div>
 
-          {/* User Request: Pill Option Button (Selection or All) */}
-          <div className="flex items-center bg-[#0d1117] border border-slate-700/80 rounded-md p-0.5 shrink-0">
+          {/* User Request: Explicit Button Pick Selection or All (No realtime freeze) */}
+          <div className="flex items-center gap-1.5 shrink-0">
             <button
               type="button"
-              onClick={() => setQueryScope('selection')}
-              title="Dapatkan hasil query DSL hanya untuk objek terpilih di CAD"
-              className={`px-2.5 py-1 rounded text-xs font-semibold flex items-center gap-1 transition-all ${
+              onClick={handlePickSelection}
+              disabled={isLoading}
+              title="Klik untuk mengambil objek yang sedang dipilih di CAD dan menjalankan query DSL"
+              className={`px-3 py-1.5 rounded-md text-xs font-semibold flex items-center gap-1.5 border transition-all ${
                 queryScope === 'selection'
-                  ? 'bg-sky-500 text-white shadow'
-                  : 'text-slate-400 hover:text-slate-200'
+                  ? 'bg-amber-500/25 text-amber-300 border-amber-500/70 shadow-sm shadow-amber-500/20'
+                  : 'bg-[#19202c] hover:bg-[#202938] border-slate-700 text-slate-300'
               }`}
             >
               <span>🎯</span>
-              <span>Selection</span>
+              <span>Pick Selection</span>
             </button>
+
             <button
               type="button"
-              onClick={() => setQueryScope('all')}
-              title="Dapatkan hasil query DSL untuk seluruh gambar CAD"
-              className={`px-2.5 py-1 rounded text-xs font-semibold flex items-center gap-1 transition-all ${
+              onClick={handleQueryAll}
+              disabled={isLoading}
+              title="Klik untuk menjalankan query DSL pada seluruh gambar CAD"
+              className={`px-3 py-1.5 rounded-md text-xs font-semibold flex items-center gap-1.5 border transition-all ${
                 queryScope === 'all'
-                  ? 'bg-sky-500 text-white shadow'
-                  : 'text-slate-400 hover:text-slate-200'
+                  ? 'bg-sky-500/25 text-sky-300 border-sky-500/70 shadow-sm shadow-sky-500/20'
+                  : 'bg-[#19202c] hover:bg-[#202938] border-slate-700 text-slate-300'
               }`}
             >
               <span>🌐</span>
