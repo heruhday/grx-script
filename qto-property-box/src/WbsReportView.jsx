@@ -265,10 +265,9 @@ export default function WbsReportView({
           targetHandles = selectedEntities.map((e) => e.handle).filter(Boolean);
         }
         if (!targetHandles || targetHandles.length === 0) {
-          alert('Belum ada objek yang dipilih di CAD. Silakan pilih objek di AutoCAD / GstarCAD, lalu klik tombol "Pick Selection".');
-          setStatusMsg('0 objek dipilih di CAD');
+          setStatusMsg('0 objek dipilih di CAD. Silakan pilih objek di CAD lalu klik "Pick Selection", atau klik "All".');
           setIsLoading(false);
-          setTimeout(() => setStatusMsg(''), 3000);
+          setTimeout(() => setStatusMsg(''), 4000);
           return;
         }
       }
@@ -276,9 +275,14 @@ export default function WbsReportView({
       if (cadConnected) {
         try {
           // Automatically inject handles: push(e.handle) if not present to support visual filter
-          const dslWithHandles = dsl.includes('handles:')
-            ? dsl
-            : dsl.replace(/(unit\s*:\s*['"][^'"]*['"])/g, '$1, handles: push(e.handle)');
+          let dslWithHandles = dsl;
+          if (!dslWithHandles.includes('handles:')) {
+            if (/(unit\s*:\s*['"][^'"]*['"])/.test(dslWithHandles)) {
+              dslWithHandles = dslWithHandles.replace(/(unit\s*:\s*['"][^'"]*['"])/g, '$1, handles: push(e.handle)');
+            } else if (/(qty\s*:\s*[^,}]+)/.test(dslWithHandles)) {
+              dslWithHandles = dslWithHandles.replace(/(qty\s*:\s*[^,}]+)/g, '$1, handles: push(e.handle)');
+            }
+          }
 
           let res;
           try {

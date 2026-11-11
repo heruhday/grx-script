@@ -172,7 +172,7 @@ namespace safe_commands
         bool isReservedOptionKey(const std::string &key)
         {
             static const std::unordered_set<std::string> s_reserved = {
-                "filter", "where", "get", "out", "entities", "ids",
+                "filter", "where", "get", "out", "entities", "handles", "ids", "select",
                 "implied", "prompt", "mode", "selectionMode", "onlyImplied",
                 "set", "init", "post", "query"
             };
