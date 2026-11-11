@@ -44,7 +44,12 @@ export const DEFAULT_SAVED_DSL_QUERIES = [
   {
     id: 'q-layer-length',
     name: 'By Layer: Total Panjang per Layer [m]',
-    dsl: "{e.layer : {all: {qty: += e.l, unit: 'm'}}}"
+    dsl: "{e.lyr : {all: {qty: += e.l, unit: 'm'}}}"
+  },
+  {
+    id: 'q-layer-area-len',
+    name: 'By Layer: Total Area & Panjang per Layer [m², m]',
+    dsl: "{e.lyr : {total: {panjang: {qty: += e.l, unit: 'm'}, luas: {qty: += e.a, unit: 'm²'}}}}"
   }
 ];
 
@@ -87,7 +92,7 @@ function generateDemoDslResult(dsl) {
 
 // Convert any nested CAD SS-QUERY result object into WBS Tree Hierarchy
 export function convertQueryResultToWbsNodes(obj, prefix = 'cad-node', descriptions = {}) {
-  if (!obj || typeof obj !== 'object') return [];
+  if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return [];
 
   return Object.entries(obj).map(([key, val], idx) => {
     const id = `${prefix}-${idx}`;
@@ -96,7 +101,11 @@ export function convertQueryResultToWbsNodes(obj, prefix = 'cad-node', descripti
     if (val && typeof val === 'object' && (val.qty !== undefined || val.unit !== undefined)) {
       const explicitCode = val.code || (key !== 'all' ? key : '');
       const descInfo = descriptions[explicitCode] || descriptions[key];
-      const displayName = descInfo?.short ? descInfo.short : (key === 'all' ? 'Total Kuantitas' : key);
+      let displayName = descInfo?.short ? descInfo.short : (key === 'all' ? 'Total Kuantitas' : key);
+      if (!descInfo?.short) {
+        if (key === 'l' || key === 'panjang') displayName = 'Panjang (l)';
+        else if (key === 'a' || key === 'luas') displayName = 'Luas (a)';
+      }
 
       return {
         id,
@@ -113,9 +122,11 @@ export function convertQueryResultToWbsNodes(obj, prefix = 'cad-node', descripti
     // Branch node with children
     if (val && typeof val === 'object') {
       const children = convertQueryResultToWbsNodes(val, id, descriptions);
+      let branchName = key === 'undefined' ? 'Unassigned / Luar Lantai' : key;
+      if (key === 'total') branchName = 'Total Kuantitas';
       return {
         id,
-        name: key === 'undefined' ? 'Unassigned / Luar Lantai' : key,
+        name: branchName,
         rawKey: key,
         children
       };
@@ -238,7 +249,14 @@ export default function WbsReportView({
   // Execute SS-QUERY in CAD and build TreeView from result (Manual / On-Demand ONLY)
   const executeQueryAndBuildTree = useCallback(
     async (dslOverride, scopeOverride) => {
-      const dsl = (dslOverride || currentDslQuery).trim();
+      let rawDsl = (dslOverride || currentDslQuery).trim();
+      // Auto-strip accidental arrow function wrapper "e => ({...})"
+      if (/^\(?e\)?\s*=>\s*\(?/.test(rawDsl)) {
+        rawDsl = rawDsl.replace(/^\(?e\)?\s*=>\s*\(?/, '').replace(/\)+$/, '').trim();
+      }
+      // Fix common typos like ",{a:" inside object literal
+      rawDsl = rawDsl.replace(/,\s*\{([a-zA-Z0-9_$]+)\s*:/g, ', $1:');
+      const dsl = rawDsl;
       const scope = scopeOverride || queryScope;
       if (!dsl) return;
 
@@ -310,6 +328,15 @@ export default function WbsReportView({
             if (res.error) {
               alert(`CAD SS-QUERY Error:\n${res.error}`);
               setStatusMsg(`Error: ${res.error}`);
+              setIsLoading(false);
+              return;
+            }
+
+            if (Array.isArray(res)) {
+              alert(
+                'Sintaks Query DSL tidak valid atau tidak menghasilkan agregasi (CAD mengembalikan entitas mentah).\n\nPastikan sintaks berupa objek DSL langsung (tanpa awalan "e=>"), contoh:\n{e.lyr : {total: {panjang: {qty: += e.l, unit: \'m\'}, luas: {qty: += e.a, unit: \'m²\'}}}}'
+              );
+              setStatusMsg('Sintaks Query DSL tidak valid');
               setIsLoading(false);
               return;
             }
@@ -985,6 +1012,18 @@ export default function WbsReportView({
                         className="text-[10px] font-mono text-sky-400 hover:text-sky-300"
                       >
                         [Template Code]
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setQueryFormDsl(
+                            "{e.lyr : {total: {panjang: {qty: += e.l, unit: 'm'}, luas: {qty: += e.a, unit: 'm²'}}}}"
+                          )
+                        }
+                        className="text-[10px] font-mono text-emerald-400 hover:text-emerald-300"
+                        title="Template Area & Panjang per Layer"
+                      >
+                        [Template Area & Panjang]
                       </button>
                     </div>
                   </div>
