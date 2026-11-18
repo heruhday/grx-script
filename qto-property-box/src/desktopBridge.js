@@ -296,8 +296,8 @@ function startDesktop() {
       await pollSelection();
       if (!selection.entities.length) throw Error('Select objects in CAD first.');
       ui.acceptCadSelection(selection.entities);
+      await applyAllToCad();
       if (project) scheduleSave();
-      notify(`${selection.entities.length} CAD object(s) recorded to active item.`);
     } catch (error) { notify(error); }
   }
 
@@ -508,12 +508,27 @@ function startDesktop() {
     });
   });
 
-  // Apply all current UI properties (General + Location) to selected CAD objects
+  // Apply all current UI properties (Item QTO + Location + General) to selected CAD objects
   async function applyAllToCad() {
+    await pollSelection();
     if (!selection.entities.length) {
-      notify('No CAD objects are selected to apply properties to.');
+      notify('No CAD objects are selected. Select objects in CAD first.');
       return;
     }
+
+    const activeInfo = ui.getActiveItem ? ui.getActiveItem() : null;
+    const cat = activeInfo?.cat;
+    const item = activeInfo?.item;
+    const typeKey = cat ? cat.id : 'length';
+
+    // 1. Ensure live CAD geometry is calculated into the item
+    if (ui.syncCadSelection) {
+      ui.syncCadSelection(selection.entities);
+    }
+
+    const totalQty = item?.rows ? item.rows.reduce((sum, r) => sum + (Number(r.value) || 0), 0) : 0;
+
+    // 2. General properties
     const keyMap = { color: 'clr', layer: 'lyr', transparency: 'trp', visible: 'visible' };
     const properties = {};
     for (const [name, propKey] of Object.entries(keyMap)) {
@@ -535,6 +550,7 @@ function startDesktop() {
       }
     }
 
+    // 3. Location properties
     const locUpdates = {};
     for (const key of ['building', 'floor', 'area', 'custom']) {
       const el = byId('location-' + key);
@@ -543,17 +559,41 @@ function startDesktop() {
       }
     }
 
+    // 4. Construct patches for CAD entities
     const patches = selection.entities.map((ent) => {
       const existingData = ent.data || {};
       const existingProps = existingData.props || {};
+      const nextProps = { ...existingProps, ...locUpdates };
+
+      if (item && item.code) {
+        const nextTypes = { ...(nextProps.types || {}) };
+        const entQty = Number(ent[typeKey === 'length' ? 'l' : (typeKey === 'area' || typeKey === 'wall' ? 'a' : (typeKey === 'solid' ? 'v' : 'l'))] || ent.l || ent.a || 0) || totalQty;
+
+        const record = {
+          code: item.code,
+          qty: entQty,
+          name: item.name || '',
+          unit: item.unit || '',
+          wbs: item.wbsCode || undefined
+        };
+
+        if (!nextTypes[typeKey]) nextTypes[typeKey] = [];
+        const existingIdx = nextTypes[typeKey].findIndex((r) => r.code === item.code);
+        if (existingIdx >= 0) nextTypes[typeKey][existingIdx] = record;
+        else nextTypes[typeKey].push(record);
+
+        nextProps.types = nextTypes;
+        nextProps.code = item.code;
+        nextProps.category = typeKey;
+        if (item.wbsCode) nextProps.wbs = item.wbsCode;
+      }
+
       return {
         handle: ent.hand || ent.handle,
         data: {
           ...existingData,
-          props: {
-            ...existingProps,
-            ...locUpdates
-          }
+          props: nextProps,
+          ...(item?.code ? { code: item.code } : {})
         },
         properties: { ...properties }
       };
@@ -561,20 +601,44 @@ function startDesktop() {
 
     try {
       await invoke('cad_apply_qto_xdata', { patches, port: 8123 });
-      notify(`Applied properties & XData to ${patches.length} CAD object(s)`);
+      const itemCodeMsg = item?.code ? ` (${item.code})` : '';
+      notify(`Applied XData${itemCodeMsg} to ${patches.length} CAD object(s) · Qty: ${Number(totalQty).toFixed(2)} ${item?.unit || 'm'}`);
       const genStatus = byId('general-status');
       if (genStatus) genStatus.textContent = `Applied to ${patches.length} object(s)`;
       await pollSelection();
+      if (project) scheduleSave();
     } catch (e) {
       notify(`Apply error: ${e}`);
     }
   }
 
-  // F5 shortcut to apply properties to CAD
-  window.addEventListener('keydown', (e) => {
+  // F5 shortcut and Enter key on inputs to apply properties to CAD
+  window.addEventListener('keydown', async (e) => {
     if (e.key === 'F5' && !e.ctrlKey && !e.altKey && !e.metaKey) {
       e.preventDefault();
-      applyAllToCad();
+      await applyAllToCad();
+    } else if (e.key === 'Enter') {
+      const codeInput = e.target.closest('#input-item-code');
+      const wbsInput = e.target.closest('#input-item-wbs-code');
+      const nameInput = e.target.closest('#input-item-name');
+      const locInput = e.target.closest('#location-panel input, #location-panel textarea');
+      const genInput = e.target.closest('#general-panel input, #general-panel select');
+      const rowInput = e.target.closest('.measurement-row-panel input');
+
+      if (codeInput || wbsInput || nameInput || locInput || genInput || rowInput) {
+        e.preventDefault();
+        e.target.blur();
+
+        const activeInfo = ui.getActiveItem ? ui.getActiveItem() : null;
+        if (activeInfo?.item) {
+          if (codeInput) activeInfo.item.code = codeInput.value.trim() || activeInfo.item.code;
+          if (wbsInput) activeInfo.item.wbsCode = wbsInput.value.trim();
+          if (nameInput) activeInfo.item.name = nameInput.value.trim() || activeInfo.item.name;
+        }
+
+        await applyAllToCad();
+        if (ui.render) ui.render();
+      }
     }
   });
 

@@ -26,15 +26,17 @@ const injectedUIState = `      window.qtoUIState = {
           render();
         },
         clearData: () => {state.categories.forEach(cat=>cat.items=[]);render();},
+        getActiveItem: () => getActiveItem(),
+        render: () => render(),
         syncCadSelection: entities => {
           const res = getActiveItem();
           if(!res || !res.item) return;
           const cat = res.cat;
           const item = res.item;
           const count = entities ? entities.length : 0;
-          const totalL = entities ? entities.reduce((sum, ent) => sum + (Number(ent.l) || 0), 0) : 0;
-          const totalA = entities ? entities.reduce((sum, ent) => sum + (Number(ent.a) || 0), 0) : 0;
-          const totalV = entities ? entities.reduce((sum, ent) => sum + (Number(ent.v) || 0), 0) : 0;
+          const totalL = entities ? entities.reduce((sum, ent) => sum + (Number(ent.l ?? ent.length) || 0), 0) : 0;
+          const totalA = entities ? entities.reduce((sum, ent) => sum + (Number(ent.a ?? ent.area) || 0), 0) : 0;
+          const totalV = entities ? entities.reduce((sum, ent) => sum + (Number(ent.v ?? ent.vol ?? ent.volume) || 0), 0) : 0;
 
           let pickRow = item.rows.find(r => r.mode === 'pick');
           if(!pickRow && item.rows.length === 1 && (pickRow = item.rows[0])) {
@@ -109,7 +111,17 @@ const injectedUIState = `      window.qtoUIState = {
             pickRow.note = count === 1 ? ('CAD ' + (entities[0].hand || entities[0].handle || 'obj')) : ('CAD ' + count + ' objects');
             pickRow.entity = entities[0];
           }
-          render();
+
+          const isFocusedInput = document.activeElement && ['input-item-code', 'input-item-wbs-code', 'input-item-name'].includes(document.activeElement.id);
+          if (isFocusedInput) {
+            const totEl = document.getElementById('detail-item-total');
+            if (totEl) totEl.textContent = fmtNum(itemTotal(item)) + ' ' + item.unit;
+            const rowValInp = document.querySelector('.measurement-row-panel .row-val-input');
+            if (rowValInp && !rowValInp.matches(':focus')) rowValInp.value = fmtNum(pickRow.value);
+            renderCategories();
+          } else {
+            render();
+          }
         },
         acceptCadSelection: entities => {
           const res = getActiveItem();
@@ -118,9 +130,9 @@ const injectedUIState = `      window.qtoUIState = {
           const item = res.item;
           if(!entities || entities.length === 0) throw Error('No objects selected in CAD');
           const count = entities.length;
-          const totalL = entities.reduce((sum, ent) => sum + (Number(ent.l) || 0), 0);
-          const totalA = entities.reduce((sum, ent) => sum + (Number(ent.a) || 0), 0);
-          const totalV = entities.reduce((sum, ent) => sum + (Number(ent.v) || 0), 0);
+          const totalL = entities.reduce((sum, ent) => sum + (Number(ent.l ?? ent.length) || 0), 0);
+          const totalA = entities.reduce((sum, ent) => sum + (Number(ent.a ?? ent.area) || 0), 0);
+          const totalV = entities.reduce((sum, ent) => sum + (Number(ent.v ?? ent.vol ?? ent.volume) || 0), 0);
 
           let pickRow = item.rows.find(r => r.mode === 'pick');
           if(!pickRow && (item.rows.length === 0 || (item.rows.length === 1 && (item.rows[0].value === 0 || !item.rows[0].value)))) {
