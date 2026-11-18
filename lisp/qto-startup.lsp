@@ -1,0 +1,17 @@
+;; QTO startup: load once. Keep RELOAD/RL available for an explicit manual update.
+(defun qto-startup-load-safe (/ app loaded result)
+  (setq loaded nil)
+  (foreach app (arx)
+    (if (wcmatch (strcase app) "*QJS_2021*") (setq loaded T))
+  )
+  (if (and (not loaded) (findfile "D:/lisp/arx/qjs_2021.arx"))
+    (progn
+      (setq result (vl-catch-all-apply 'arxload (list "D:/lisp/arx/qjs_2021.arx")))
+      (if (vl-catch-all-error-p result)
+        (princ (strcat "\n[QTO] Startup load failed: " (vl-catch-all-error-message result)))
+      )
+    )
+  )
+  (princ)
+)
+(qto-startup-load-safe)

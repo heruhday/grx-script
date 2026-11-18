@@ -2876,6 +2876,8 @@ namespace safe_commands
 
     JSValue jsQtoPoll(JSContext *context, JSValueConst, int argc, JSValueConst *argv)
     {
+        selection_event::syncImpliedSelection();
+
         AcApDocument *pDoc = acDocManager ? acDocManager->curDocument() : nullptr;
         std::string dwgName = "Untitled.dwg";
         if (pDoc != nullptr && pDoc->docTitle() != nullptr)

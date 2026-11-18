@@ -11,7 +11,11 @@
 #include <ws2tcpip.h>
 
 #include <atomic>
+#include <algorithm>
+#include <chrono>
 #include <condition_variable>
+#include <cwchar>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -23,8 +27,10 @@
 #include "actrans.h"
 #include "acutads.h"
 #include "commands.h"
+#include "ipc_request.h"
 #include "text_util.h"
 #include "../src/js_engine.h"
+#include "../src/selection_event.h"
 
 namespace
 {
@@ -81,19 +87,9 @@ private:
     Acad::ErrorStatus status_;
 };
 
-struct IpcEvalRequest
-{
-    explicit IpcEvalRequest(const std::string& scriptText)
-        : script(scriptText), done(false)
-    {
-    }
-
-    std::string script;
-    js_engine::EvalResult result;
-    std::mutex mutex;
-    std::condition_variable condition;
-    bool done;
-};
+using IpcEvalRequest = ipc_bridge::Request;
+using IpcRequestPtr = ipc_bridge::RequestPtr;
+using ipc_bridge::completeRequest;
 
 void setListenSocket(SOCKET socket)
 {
@@ -127,10 +123,12 @@ void closeListenSocket()
     closeSocketHandle(socket);
 }
 
-void setActiveClientSocket(SOCKET socket)
+bool setActiveClientSocket(SOCKET socket)
 {
     std::lock_guard<std::mutex> lock(g_socketMutex);
+    if (!g_running) return false;
     g_activeClientSocket = socket;
+    return true;
 }
 
 SOCKET clearActiveClientSocket(SOCKET socket)
@@ -156,10 +154,10 @@ void closeActiveClientSocket()
     closeSocketHandle(socket);
 }
 
-std::string jsonError(const std::string& message)
+std::string jsonString(const std::string& value)
 {
-    std::string result = "{\"error\":\"";
-    for (unsigned char ch : message)
+    std::string result = "\"";
+    for (unsigned char ch : value)
     {
         switch (ch)
         {
@@ -192,13 +190,200 @@ std::string jsonError(const std::string& message)
             break;
         }
     }
-    result += "\"}";
+    result += "\"";
     return result;
 }
 
+std::string jsonError(const std::string& message)
+{
+    return "{\"error\":" + jsonString(message) + "}";
+}
+
 const UINT WM_GRX_IPC_EVAL = WM_USER + 0x7123;
-HWND g_hBridgeWnd = nullptr;
+std::atomic<HWND> g_hBridgeWnd{nullptr};
 const wchar_t* const kBridgeClassName = L"GrxScriptIpcBridgeClass";
+const std::string kOpenDrawingPrefix = "QTO_OPEN_DWG\n";
+const std::string kListDrawingsCommand = "QTO_LIST_DWGS";
+
+bool absoluteDrawingPath(const std::wstring& input, std::wstring& output)
+{
+    const bool drivePath = input.size() >= 3 && input[1] == L':' &&
+        (input[2] == L'\\' || input[2] == L'/');
+    const bool uncPath = input.size() >= 2 && input[0] == L'\\' && input[1] == L'\\';
+    if (!drivePath && !uncPath)
+    {
+        return false;
+    }
+    const DWORD required = GetFullPathNameW(input.c_str(), 0, nullptr, nullptr);
+    if (required == 0)
+    {
+        return false;
+    }
+    std::vector<wchar_t> buffer(required);
+    const DWORD written = GetFullPathNameW(input.c_str(), required, buffer.data(), nullptr);
+    if (written == 0 || written >= required)
+    {
+        return false;
+    }
+    output.assign(buffer.data(), written);
+    std::replace(output.begin(), output.end(), L'/', L'\\');
+    // Rust canonical paths may use the Win32 extended prefix while CAD's
+    // document fileName() uses a normal drive/UNC path. Normalize both forms.
+    if (output.size() >= 8 && _wcsnicmp(output.c_str(), L"\\\\?\\UNC\\", 8) == 0)
+    {
+        output = L"\\\\" + output.substr(8);
+    }
+    else if (output.size() >= 7 && output.compare(0, 4, L"\\\\?\\") == 0 && output[5] == L':')
+    {
+        output.erase(0, 4);
+    }
+    return true;
+}
+
+js_engine::EvalResult listDrawingsOnMainThread()
+{
+    if (acDocManager == nullptr)
+    {
+        return {false, jsonError("CAD document manager is unavailable")};
+    }
+
+    AcApDocument* active = acDocManager->mdiActiveDocument();
+    if (active == nullptr)
+    {
+        active = acDocManager->curDocument();
+    }
+    std::unique_ptr<AcApDocumentIterator> documents(acDocManager->newAcApDocumentIterator());
+    if (!documents)
+    {
+        return {false, jsonError("CAD could not enumerate open drawings")};
+    }
+
+    std::string paths;
+    std::string activePath = "null";
+    size_t skipped = 0;
+    for (; !documents->done(); documents->step())
+    {
+        AcApDocument* document = documents->document();
+        std::wstring path;
+        // Untitled documents normally have only a relative name. Accept only
+        // an absolute, saved DWG that still exists on disk; never save it here.
+        if (document == nullptr || !document->isNamedDrawing() || document->fileName() == nullptr ||
+            !absoluteDrawingPath(document->fileName(), path) || path.size() < 4 ||
+            _wcsicmp(path.c_str() + path.size() - 4, L".dwg") != 0)
+        {
+            ++skipped;
+            continue;
+        }
+        const DWORD attributes = GetFileAttributesW(path.c_str());
+        if (attributes == INVALID_FILE_ATTRIBUTES || (attributes & FILE_ATTRIBUTE_DIRECTORY) != 0)
+        {
+            ++skipped;
+            continue;
+        }
+
+        const std::string encodedPath = jsonString(command_text::toUtf8(path.c_str()));
+        if (!paths.empty())
+        {
+            paths += ',';
+        }
+        paths += encodedPath;
+        if (document == active)
+        {
+            activePath = encodedPath;
+        }
+    }
+    return {true, "{\"ok\":true,\"paths\":[" + paths + "],\"activePath\":" +
+        activePath + ",\"skipped\":" + std::to_string(skipped) + "}"};
+}
+
+js_engine::EvalResult openDrawingOnMainThread(const std::string& utf8Path)
+{
+    if (utf8Path.empty() || utf8Path.find_first_of("\r\n") != std::string::npos ||
+        utf8Path.find('\0') != std::string::npos)
+    {
+        return {false, jsonError("Drawing path is empty or contains an invalid control character")};
+    }
+    const int required = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS,
+        utf8Path.data(), static_cast<int>(utf8Path.size()), nullptr, 0);
+    if (required == 0)
+    {
+        return {false, jsonError("Drawing path is not valid UTF-8")};
+    }
+    std::wstring input(required, L'\0');
+    if (MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, utf8Path.data(),
+        static_cast<int>(utf8Path.size()), &input[0], required) != required)
+    {
+        return {false, jsonError("Failed to decode drawing path")};
+    }
+    std::wstring path;
+    if (!absoluteDrawingPath(input, path) || path.size() < 4 ||
+        _wcsicmp(path.c_str() + path.size() - 4, L".dwg") != 0)
+    {
+        return {false, jsonError("Drawing path must be an absolute path to a .dwg file")};
+    }
+    const DWORD attributes = GetFileAttributesW(path.c_str());
+    if (attributes == INVALID_FILE_ATTRIBUTES)
+    {
+        return {false, jsonError("Drawing file is missing or inaccessible (Windows error " +
+            std::to_string(GetLastError()) + ")")};
+    }
+    if ((attributes & FILE_ATTRIBUTE_DIRECTORY) != 0)
+    {
+        return {false, jsonError("Drawing path refers to a directory, not a file")};
+    }
+    if (acDocManager == nullptr)
+    {
+        return {false, jsonError("CAD document manager is unavailable")};
+    }
+    // The SDK requires NEW/OPEN to run in application context. Never open or
+    // activate a document underneath the generic IPC evaluation document lock.
+    if (!acDocManager->isApplicationContext())
+    {
+        return {false, jsonError("CAD is busy in document context; finish the current command and try again")};
+    }
+    AcApDocument* active = acDocManager->mdiActiveDocument();
+    if (active != nullptr && !active->isQuiescent())
+    {
+        return {false, jsonError("CAD is busy; finish the current command and try again")};
+    }
+
+    AcApDocument* existing = nullptr;
+    std::unique_ptr<AcApDocumentIterator> documents(acDocManager->newAcApDocumentIterator());
+    if (documents)
+    {
+        for (; !documents->done(); documents->step())
+        {
+            AcApDocument* document = documents->document();
+            std::wstring existingPath;
+            if (document != nullptr && document->fileName() != nullptr &&
+                absoluteDrawingPath(document->fileName(), existingPath) &&
+                _wcsicmp(path.c_str(), existingPath.c_str()) == 0)
+            {
+                existing = document;
+                break;
+            }
+        }
+    }
+    documents.reset();
+    if (existing != nullptr)
+    {
+        const Acad::ErrorStatus status = existing == active ? Acad::eOk :
+            acDocManager->activateDocument(existing);
+        if (status != Acad::eOk)
+        {
+            return {false, jsonError("Failed to activate drawing (Acad status " +
+                std::to_string(static_cast<int>(status)) + ")")};
+        }
+        return {true, "{\"ok\":true,\"action\":\"activated\"}"};
+    }
+    const Acad::ErrorStatus status = acDocManager->appContextOpenDocument(path.c_str());
+    if (status != Acad::eOk)
+    {
+        return {false, jsonError("Failed to open drawing (Acad status " +
+            std::to_string(static_cast<int>(status)) + ")")};
+    }
+    return {true, "{\"ok\":true,\"action\":\"opened\"}"};
+}
 
 void executeOnMainThread(IpcEvalRequest* request)
 {
@@ -207,25 +392,56 @@ void executeOnMainThread(IpcEvalRequest* request)
         return;
     }
 
+    if (request->cancelled || !g_running)
+    {
+        completeRequest(request, {false, jsonError("CAD request was cancelled")});
+        return;
+    }
+
     js_engine::EvalResult result;
     try
     {
-        AcApDocument* document = acDocManager != nullptr ? acDocManager->curDocument() : nullptr;
-        DocumentLockGuard documentLock(document);
-        if (!documentLock.ok())
+        if (request->script == kListDrawingsCommand)
         {
-            result = {false, jsonError("failed to lock current document: " + std::to_string(static_cast<int>(documentLock.status())))};
+            result = listDrawingsOnMainThread();
+        }
+        else if (request->script.compare(0, kOpenDrawingPrefix.size(), kOpenDrawingPrefix) == 0)
+        {
+            result = openDrawingOnMainThread(request->script.substr(kOpenDrawingPrefix.size()));
         }
         else
         {
-            result = js_engine::evalJson(request->script);
-            if (result.ok)
+            const bool isReadOnly = (request->script.rfind("editor.qtoPoll", 0) == 0 ||
+                                     request->script.find("qtoPoll") != std::string::npos);
+
+            AcApDocument* document = acDocManager != nullptr ? acDocManager->curDocument() : nullptr;
+            if (isReadOnly)
             {
-                js_engine::eval("if (globalThis.transaction !== null) { tm.commit(); }");
+                // Read-only queries like qtoPoll do NOT need an exclusive write lock.
+                // This prevents "failed to lock current document: 12" when CAD is in mid-pick or command.
+                result = js_engine::evalJson(request->script);
             }
             else
             {
-                js_engine::eval("if (globalThis.transaction !== null) { tm.abort(); }");
+                DocumentLockGuard documentLock(document);
+                if (!documentLock.ok())
+                {
+                    result = {false, jsonError("failed to lock current document: " + std::to_string(static_cast<int>(documentLock.status())))};
+                }
+                else
+                {
+                    result = js_engine::evalJson(request->script);
+                    if (result.ok)
+                    {
+                        js_engine::eval("if (globalThis.transaction !== null) { tm.commit(); }");
+                        selection_event::notifySelectionModified();
+                        acedUpdateDisplay();
+                    }
+                    else
+                    {
+                        js_engine::eval("if (globalThis.transaction !== null) { tm.abort(); }");
+                    }
+                }
             }
         }
     }
@@ -238,16 +454,15 @@ void executeOnMainThread(IpcEvalRequest* request)
         result = {false, jsonError("Unknown exception during script evaluation")};
     }
 
-    request->result = result;
-    request->done = true;
+    completeRequest(request, std::move(result));
 }
 
 LRESULT CALLBACK ipcBridgeWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 {
     if (msg == WM_GRX_IPC_EVAL)
     {
-        IpcEvalRequest* request = reinterpret_cast<IpcEvalRequest*>(wParam);
-        executeOnMainThread(request);
+        std::unique_ptr<IpcRequestPtr> message(reinterpret_cast<IpcRequestPtr*>(wParam));
+        if (message && *message) executeOnMainThread(message->get());
         return 1;
     }
     return DefWindowProcW(hwnd, msg, wParam, lParam);
@@ -257,6 +472,18 @@ void ensureBridgeWindowOnMainThread()
 {
     if (g_hBridgeWnd != nullptr && IsWindow(g_hBridgeWnd))
     {
+        // Cancel queued messages before destroying the window so their shared
+        // request storage is released without executing late CAD operations.
+        MSG queued = {};
+        while (PeekMessageW(&queued, g_hBridgeWnd, WM_GRX_IPC_EVAL, WM_GRX_IPC_EVAL, PM_REMOVE))
+        {
+            std::unique_ptr<IpcRequestPtr> message(reinterpret_cast<IpcRequestPtr*>(queued.wParam));
+            if (message && *message)
+            {
+                (*message)->cancelled = true;
+                completeRequest(message->get(), {false, jsonError("CAD IPC bridge stopped")});
+            }
+        }
         return;
     }
 
@@ -293,31 +520,29 @@ void destroyBridgeWindow()
 
 std::string evaluateScriptInApplicationContext(const std::string& script)
 {
-    if (g_hBridgeWnd == nullptr || !IsWindow(g_hBridgeWnd))
+    const HWND bridge = g_hBridgeWnd.load();
+    if (!g_running || bridge == nullptr || !IsWindow(bridge))
     {
         return jsonError("AutoCAD IPC bridge window not ready");
     }
 
-    IpcEvalRequest request(script);
-
-    DWORD_PTR dwResult = 0;
-    LRESULT lr = SendMessageTimeoutW(
-        g_hBridgeWnd,
-        WM_GRX_IPC_EVAL,
-        reinterpret_cast<WPARAM>(&request),
-        0,
-        SMTO_NORMAL,
-        20000,
-        &dwResult
-    );
-
-    if (lr == 0)
+    const auto request = std::make_shared<IpcEvalRequest>(script);
+    auto* message = new IpcRequestPtr(request);
+    if (!PostMessageW(bridge, WM_GRX_IPC_EVAL, reinterpret_cast<WPARAM>(message), 0))
     {
-        DWORD err = GetLastError();
-        return jsonError(err == ERROR_TIMEOUT ? "AutoCAD request timed out (busy)" : "Failed to marshal to AutoCAD main thread");
+        delete message;
+        return jsonError("Failed to marshal to CAD main thread");
     }
 
-    return request.result.text;
+    // The worker never waits in SendMessage while the UI thread is joining it
+    // during unload. Shared ownership also keeps timed-out requests alive until
+    // their queued message is processed or discarded.
+    const auto timeout = script.compare(0, kOpenDrawingPrefix.size(), kOpenDrawingPrefix) == 0
+        ? std::chrono::seconds(180) : std::chrono::seconds(20);
+    const auto status = ipc_bridge::waitForRequest(*request, g_running, timeout);
+    if (status == ipc_bridge::WaitStatus::Completed) return request->result.text;
+    if (status == ipc_bridge::WaitStatus::TimedOut) return jsonError("CAD request timed out (busy)");
+    return jsonError("CAD IPC server stopped");
 }
 
 std::string readClientScript(SOCKET client)
@@ -375,7 +600,11 @@ void sendAll(SOCKET client, const std::string& response)
 
 void handleClient(SOCKET client)
 {
-    setActiveClientSocket(client);
+    if (!setActiveClientSocket(client))
+    {
+        closeSocketHandle(client);
+        return;
+    }
 
     const std::string script = readClientScript(client);
     if (script.empty())
@@ -510,6 +739,7 @@ namespace commands
 {
 void jsServer()
 {
+    ensureBridgeWindowOnMainThread();
     if (g_running)
     {
         stopServer();

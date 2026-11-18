@@ -240,9 +240,9 @@ namespace
         acrxDynamicLinker->registerAppMDIAware(appId);
 
         const bool jsEngineReady = js_engine::initialize();
-        commands::initIpcBridge();
         selection_event::install();
-        commands::startJsIpcServer(8123);
+        // Start the IPC bridge/server from QTO or js:server, after startup
+        // loading has finished. Startup scripts may unload/reload this module.
 
         // Register AutoCAD Commands
         registerCommand(ACRX_T("HELLOARX"), ACRX_T("HELLOARX"), commands::helloArx);

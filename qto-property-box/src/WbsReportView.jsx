@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useCallback, useEffect } from 'react';
+import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import {
   FolderTree,
@@ -23,71 +23,45 @@ import {
 import DescriptionModal from './DescriptionModal';
 
 // ============================================================================
-// 1. DEFAULT SAVED DSL QUERIES (Gambar 2 & Gambar 3)
+// 1. DEFAULT SAVED DSL QUERIES
 // ============================================================================
 export const DEFAULT_SAVED_DSL_QUERIES = [
   {
     id: 'q-wall-floor',
-    name: 'Dinding: Luas per Lantai (Floor & Wall Height) [m²]',
+    name: 'Wall Area by Floor (Floor & Wall Height) [m²]',
     dsl: "{e.data.props.floor : {all: {qty: += e.l * (e?.props?.types?.wall?.[0]?.height ?? 0), unit: 'm²'}}}"
   },
   {
     id: 'q-code-summary',
-    name: 'By Code: Rekap Luas / Panjang / Jumlah [m², m, unit]',
+    name: 'By Code: Area / Length / Count Summary [m², m, units]',
     dsl: "{e.code : {qty: += e.a/1e6 || += e.l/1e3 || ++, unit: e.a ? 'm²' : (e.l ? 'm' : 'unit')}}"
   },
   {
     id: 'q-floor-code',
-    name: 'By Floor & Code: Panjang per Lantai [m]',
+    name: 'By Floor & Code: Length by Floor [m]',
     dsl: "{e.data.props.floor : {e.code : {qty: += e.l, unit: 'm'}}}"
   },
   {
     id: 'q-layer-length',
-    name: 'By Layer: Total Panjang per Layer [m]',
+    name: 'By Layer: Total Length per Layer [m]',
     dsl: "{e.lyr : {all: {qty: += e.l, unit: 'm'}}}"
   },
   {
     id: 'q-layer-area-len',
-    name: 'By Layer: Total Area & Panjang per Layer [m², m]',
-    dsl: "{e.lyr : {total: {panjang: {qty: += e.l, unit: 'm'}, luas: {qty: += e.a, unit: 'm²'}}}}"
+    name: 'By Layer: Total Area & Length per Layer [m², m]',
+    dsl: "{e.lyr : {total: {length: {qty: += e.l, unit: 'm'}, area: {qty: += e.a, unit: 'm²'}}}}"
   }
 ];
 
-// Offline simulation data generator if CAD is not running
-function generateDemoDslResult(dsl) {
-  if (dsl.includes('floor') && dsl.includes('wall')) {
-    return {
-      'Lantai Basement 1': {
-        'Area Parkir Utama': {
-          'Galian Tanah Struktur': { qty: 1250, unit: 'm³', handles: ['50A1', '50A2'] },
-          'Pengecoran Beton Slab': { qty: 480, unit: 'm³', handles: ['50A3'] },
-          'Floor Hardener Metallic': { qty: 1600, unit: 'm²', handles: ['50A4', '50A5'] }
-        }
-      },
-      'Lantai Dasar (Ground Floor)': {
-        'Lobby Utama & Reception': {
-          'Pasangan Homogeneous Tile': { code: 'HT1', qty: 340, unit: 'm²', handles: ['50B1'] },
-          'Plafon Gypsum Board': { code: 'CLG1', qty: 310, unit: 'm²', handles: ['50B2'] },
-          'Dinding Glass Partisi': { code: 'GLS1', qty: 85, unit: 'm²', handles: ['50B3'] }
-        },
-        'Area Koridor & Toilet Public': {
-          'Pasangan Keramik Dinding': { code: 'FloorFin/CT1', qty: 140, unit: 'm²', handles: ['50C1'] },
-          'Pekerjaan Sanitair Closet': { code: 'SAN1', qty: 12, unit: 'unit', handles: ['50C2'] }
-        }
-      },
-      'Lantai 2 (Office Space)': {
-        'Ruang Kerja Open Plan A': {
-          'Pemasangan Karpet Tile': { code: 'CPT1', qty: 520, unit: 'm²', handles: ['50D1'] },
-          'Pengecatan Dinding Emulsi': { code: 'PNT1', qty: 410, unit: 'm²', handles: ['50D2'] }
-        }
-      }
-    };
-  }
-  return {
-    'FloorFin/CT1': { qty: 140, unit: 'm²', handles: ['50C1'] },
-    'CPT1': { qty: 520, unit: 'm²', handles: ['50D1'] },
-    'SAN1': { qty: 12, unit: 'unit', handles: ['50C2'] }
-  };
+// Keep report writes ordered per project, including while switching tabs.
+const reportWriteQueues = new Map();
+function queueProjectReportSave(projectPath, value) {
+  const previous = reportWriteQueues.get(projectPath) || Promise.resolve();
+  const write = previous.catch(() => {}).then(() => invoke('save_project_setting', {
+    projectPath, key: 'report', value
+  }));
+  reportWriteQueues.set(projectPath, write);
+  return write;
 }
 
 // Convert any nested CAD SS-QUERY result object into WBS Tree Hierarchy
@@ -101,10 +75,10 @@ export function convertQueryResultToWbsNodes(obj, prefix = 'cad-node', descripti
     if (val && typeof val === 'object' && (val.qty !== undefined || val.unit !== undefined)) {
       const explicitCode = val.code || (key !== 'all' ? key : '');
       const descInfo = descriptions[explicitCode] || descriptions[key];
-      let displayName = descInfo?.short ? descInfo.short : (key === 'all' ? 'Total Kuantitas' : key);
+      let displayName = descInfo?.short ? descInfo.short : (key === 'all' ? 'Total Quantity' : key);
       if (!descInfo?.short) {
-        if (key === 'l' || key === 'panjang') displayName = 'Panjang (l)';
-        else if (key === 'a' || key === 'luas') displayName = 'Luas (a)';
+        if (key === 'l' || key === 'panjang') displayName = 'Length (l)';
+        else if (key === 'a' || key === 'luas') displayName = 'Area (a)';
       }
 
       return {
@@ -122,8 +96,8 @@ export function convertQueryResultToWbsNodes(obj, prefix = 'cad-node', descripti
     // Branch node with children
     if (val && typeof val === 'object') {
       const children = convertQueryResultToWbsNodes(val, id, descriptions);
-      let branchName = key === 'undefined' ? 'Unassigned / Luar Lantai' : key;
-      if (key === 'total') branchName = 'Total Kuantitas';
+      let branchName = key === 'undefined' ? 'Unassigned / No Floor' : key;
+      if (key === 'total') branchName = 'Total Quantity';
       return {
         id,
         name: branchName,
@@ -181,40 +155,95 @@ function formatQty(val) {
 }
 
 export default function WbsReportView({
+  project,
   cadConnected,
   cadPlatform,
   cadDwgName,
   ipcPort,
   selectedEntities = [],
+  selectionHash = null,
   descriptions = {},
   onSaveDescription,
   onDeleteDescription
 }) {
-  // 1. Saved DSL Queries List (CRUD)
-  const [savedQueries, setSavedQueries] = useState(() => {
-    try {
-      const saved = localStorage.getItem('grx_saved_dsl_queries');
-      return saved ? JSON.parse(saved) : DEFAULT_SAVED_DSL_QUERIES;
-    } catch {
-      return DEFAULT_SAVED_DSL_QUERIES;
-    }
-  });
+  const [savedQueries, setSavedQueries] = useState(DEFAULT_SAVED_DSL_QUERIES);
+  const [activeQueryId, setActiveQueryIdState] = useState(DEFAULT_SAVED_DSL_QUERIES[0].id);
+  const [queryScope, setQueryScopeState] = useState('all');
+  const [settingsReady, setSettingsReady] = useState(false);
+  const [settingsLoadAttempt, setSettingsLoadAttempt] = useState(0);
+  const [persistenceError, setPersistenceError] = useState('');
+  const settingsReadyRef = useRef(false);
+  const reportSettingsRef = useRef(null);
 
-  // Active Query ID & Query Text
-  const [activeQueryId, setActiveQueryId] = useState(() => {
-    return DEFAULT_SAVED_DSL_QUERIES[0].id;
-  });
+  useEffect(() => {
+    let cancelled = false;
+    settingsReadyRef.current = false;
+    setSettingsReady(false);
+    setPersistenceError('');
+    const load = async () => {
+      try {
+        // A previous report tab may still be finishing its last queued write.
+        await (reportWriteQueues.get(project.path) || Promise.resolve()).catch(() => {});
+        let saved = await invoke('get_project_setting', { projectPath: project.path, key: 'report' });
+        if (!saved && await invoke('get_project_setting', { projectPath: project.path, key: 'legacy_import_available' })) {
+          // One-time import into the first project; all subsequent reads/writes
+          // use the project database. Leave the old browser copy untouched.
+          let legacy;
+          try { legacy = JSON.parse(localStorage.getItem('grx_saved_dsl_queries') || 'null'); } catch { legacy = null; }
+          if (Array.isArray(legacy) && legacy.length && legacy.every((query) =>
+            query && typeof query.id === 'string' && typeof query.name === 'string' && typeof query.dsl === 'string')) {
+            saved = { savedQueries: legacy, activeQueryId: legacy[0].id, queryScope: 'all' };
+            await queueProjectReportSave(project.path, saved);
+          }
+        }
+        if (cancelled) return;
+        const validQueries = Array.isArray(saved?.savedQueries) && saved.savedQueries.length > 0 &&
+          saved.savedQueries.every((query) => query && typeof query.id === 'string' && typeof query.name === 'string' && typeof query.dsl === 'string');
+        const queries = validQueries ? saved.savedQueries : DEFAULT_SAVED_DSL_QUERIES;
+        const active = queries.some((query) => query.id === saved?.activeQueryId) ? saved.activeQueryId : queries[0].id;
+        const scope = saved?.queryScope === 'selection' ? 'selection' : 'all';
+        reportSettingsRef.current = { savedQueries: queries, activeQueryId: active, queryScope: scope };
+        setSavedQueries(queries);
+        setActiveQueryIdState(active);
+        setQueryScopeState(scope);
+        settingsReadyRef.current = true;
+        setSettingsReady(true);
+      } catch (error) {
+        if (!cancelled) setPersistenceError(String(error));
+      }
+    };
+    load();
+    return () => { cancelled = true; settingsReadyRef.current = false; };
+  }, [project.path, settingsLoadAttempt]);
 
-  // 2. Pill Option Button: 'all' vs 'selection'
-  const [queryScope, setQueryScope] = useState('all'); // 'all' | 'selection'
+  const persistReportSettings = (changes) => {
+    if (!settingsReadyRef.current) return;
+    const next = { ...reportSettingsRef.current, ...changes };
+    reportSettingsRef.current = next;
+    queueProjectReportSave(project.path, next).then(() => setPersistenceError(''))
+      .catch((error) => setPersistenceError(`Could not save report settings: ${String(error)}`));
+  };
+  const persistQueries = (queries) => {
+    setSavedQueries(queries);
+    persistReportSettings({ savedQueries: queries });
+  };
+  const setActiveQueryId = (id) => {
+    setActiveQueryIdState(id);
+    persistReportSettings({ activeQueryId: id });
+  };
+  const setQueryScope = (scope) => {
+    setQueryScopeState(scope);
+    persistReportSettings({ queryScope: scope });
+  };
 
   // 3. TreeView Data (100% generated from DSL Query)
   const [wbsData, setWbsData] = useState([]);
   const [expandedNodes, setExpandedNodes] = useState(new Set());
   const [searchQuery, setSearchQuery] = useState('');
-  const [projectTitle, setProjectTitle] = useState('Pembangunan Gedung Perkantoran & Komersial');
   const [statusMsg, setStatusMsg] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const queryRequestRef = useRef(0);
+  const executeQueryRef = useRef(null);
 
   // 4. Visual Filter Mode & Checkboxes (Requirement 3)
   const [filterModeActive, setFilterModeActive] = useState(false);
@@ -230,25 +259,18 @@ export default function WbsReportView({
   const [descModalOpen, setDescModalOpen] = useState(false);
   const [descModalCode, setDescModalCode] = useState('');
 
-  // Save queries to localStorage
-  const persistQueries = (queries) => {
-    setSavedQueries(queries);
-    try {
-      localStorage.setItem('grx_saved_dsl_queries', JSON.stringify(queries));
-    } catch (e) {
-      console.warn('Failed to save queries to localStorage:', e);
-    }
-  };
-
   // Active DSL Query String
   const currentDslQuery = useMemo(() => {
     const q = savedQueries.find((item) => item.id === activeQueryId);
     return q ? q.dsl : DEFAULT_SAVED_DSL_QUERIES[0].dsl;
   }, [savedQueries, activeQueryId]);
 
-  // Execute SS-QUERY in CAD and build TreeView from result (Manual / On-Demand ONLY)
+  // Execute SS-QUERY for manual requests and selection-hash changes.
   const executeQueryAndBuildTree = useCallback(
-    async (dslOverride, scopeOverride) => {
+    async (dslOverride, scopeOverride, handlesOverride) => {
+      if (!settingsReadyRef.current) return;
+      const requestId = ++queryRequestRef.current;
+      const isStale = () => requestId !== queryRequestRef.current;
       let rawDsl = (dslOverride || currentDslQuery).trim();
       // Auto-strip accidental arrow function wrapper "e => ({...})"
       if (/^\(?e\)?\s*=>\s*\(?/.test(rawDsl)) {
@@ -261,29 +283,35 @@ export default function WbsReportView({
       if (!dsl) return;
 
       setIsLoading(true);
-      setStatusMsg('Mengevaluasi SS-QUERY di CAD...');
+      setStatusMsg('Evaluating SS-QUERY in CAD...');
 
-      // Handles for selection scope: fetched ON-DEMAND when user clicks "Pick Selection"
+      // Automatic refresh uses the same selection snapshot as the QTO view.
       let targetHandles = null;
       if (scope === 'selection') {
-        if (cadConnected) {
+        if (handlesOverride !== undefined) {
+          targetHandles = handlesOverride;
+        } else if (cadConnected) {
           try {
             const pollRes = await invoke('cad_poll_selection', {
               lastVersion: 0,
               port: ipcPort
             });
-            if (pollRes && pollRes.handles && pollRes.handles.length > 0) {
+            if (isStale()) return;
+            if (Array.isArray(pollRes?.handles)) {
               targetHandles = pollRes.handles;
             }
           } catch (e) {
             console.warn('Failed to poll selection on demand:', e);
           }
         }
-        if (!targetHandles || targetHandles.length === 0) {
+        if (targetHandles === null) {
           targetHandles = selectedEntities.map((e) => e.handle).filter(Boolean);
         }
         if (!targetHandles || targetHandles.length === 0) {
-          setStatusMsg('0 objek dipilih di CAD. Silakan pilih objek di CAD lalu klik "Pick Selection", atau klik "All".');
+          setWbsData([]);
+          setExpandedNodes(new Set());
+          setCheckedNodeIds(new Set());
+          setStatusMsg('No CAD objects selected. Select objects in CAD, then click "Pick Selection" or "All".');
           setIsLoading(false);
           setTimeout(() => setStatusMsg(''), 4000);
           return;
@@ -324,6 +352,7 @@ export default function WbsReportView({
             });
           }
 
+          if (isStale()) return;
           if (res && typeof res === 'object') {
             if (res.error) {
               alert(`CAD SS-QUERY Error:\n${res.error}`);
@@ -334,9 +363,9 @@ export default function WbsReportView({
 
             if (Array.isArray(res)) {
               alert(
-                'Sintaks Query DSL tidak valid atau tidak menghasilkan agregasi (CAD mengembalikan entitas mentah).\n\nPastikan sintaks berupa objek DSL langsung (tanpa awalan "e=>"), contoh:\n{e.lyr : {total: {panjang: {qty: += e.l, unit: \'m\'}, luas: {qty: += e.a, unit: \'m²\'}}}}'
+                'The Query DSL syntax is invalid or does not produce an aggregation (CAD returned raw entities).\n\nUse a direct DSL object without an "e=>" prefix. Example:\n{e.lyr : {total: {length: {qty: += e.l, unit: \'m\'}, area: {qty: += e.a, unit: \'m²\'}}}}'
               );
-              setStatusMsg('Sintaks Query DSL tidak valid');
+              setStatusMsg('Invalid Query DSL syntax');
               setIsLoading(false);
               return;
             }
@@ -347,49 +376,50 @@ export default function WbsReportView({
             setExpandedNodes(new Set(allIds));
             const qNodes = getQuantityNodes(nodes);
             setCheckedNodeIds(new Set(qNodes.map((n) => n.id)));
-            const scopeLabel = scope === 'selection' ? `Seleksi (${targetHandles?.length || 0} obj)` : 'Seluruh Gambar';
-            setStatusMsg(`Sukses: ${scopeLabel} • ${qNodes.length} item kuantitas`);
+            const scopeLabel = scope === 'selection' ? `Selection (${targetHandles?.length || 0} objects)` : 'Entire Drawing';
+            setStatusMsg(`Success: ${scopeLabel} • ${qNodes.length} quantity item(s)`);
           } else {
-            setStatusMsg('Hasil query kosong');
+            setStatusMsg('Query returned no results');
           }
         } catch (err) {
-          alert(`Gagal menjalankan SS-QUERY di CAD:\n${String(err)}`);
-          setStatusMsg(`Query gagal: ${String(err)}`);
+          if (isStale()) return;
+          alert(`Failed to run SS-QUERY in CAD:\n${String(err)}`);
+          setStatusMsg(`Query failed: ${String(err)}`);
         }
       } else {
-        // Offline simulation mode
-        const demoRes = generateDemoDslResult(dsl);
-        const nodes = convertQueryResultToWbsNodes(demoRes, 'wbs-demo', descriptions);
-        setWbsData(nodes);
-        const allIds = getAllNodeIds(nodes);
-        setExpandedNodes(new Set(allIds));
-        const qNodes = getQuantityNodes(nodes);
-        setCheckedNodeIds(new Set(qNodes.map((n) => n.id)));
-        setStatusMsg('Tree dimuat dari simulasi offline');
+        setWbsData([]);
+        setExpandedNodes(new Set());
+        setCheckedNodeIds(new Set());
+        setStatusMsg('Connect CAD to run this project report.');
       }
 
       setIsLoading(false);
       setTimeout(() => setStatusMsg(''), 3000);
     },
-    [currentDslQuery, queryScope, cadConnected, ipcPort, descriptions]
+    [currentDslQuery, queryScope, cadConnected, ipcPort, descriptions, selectedEntities]
   );
 
   // Manual trigger for Pick Selection button
   const handlePickSelection = async () => {
-    setQueryScope('selection');
-    await executeQueryAndBuildTree(currentDslQuery, 'selection');
+    if (queryScope !== 'selection') setQueryScope('selection');
+    else await executeQueryAndBuildTree(currentDslQuery, 'selection');
   };
 
   // Manual trigger for All Entities button
   const handleQueryAll = async () => {
-    setQueryScope('all');
-    await executeQueryAndBuildTree(currentDslQuery, 'all');
+    if (queryScope !== 'all') setQueryScope('all');
+    else await executeQueryAndBuildTree(currentDslQuery, 'all');
   };
 
-  // Run query once on mount or when activeQueryId changes (NEVER on realtime selection!)
+  executeQueryRef.current = executeQueryAndBuildTree;
+
+  // The parent changes this SHA-256 hash only when the selected IDs change.
   useEffect(() => {
-    executeQueryAndBuildTree(currentDslQuery, queryScope);
-  }, [activeQueryId]);
+    if (!settingsReady) return;
+    executeQueryRef.current(currentDslQuery, queryScope,
+      queryScope === 'selection' ? selectedEntities.map((entity) => entity.hand ?? entity.handle).filter(Boolean) : undefined);
+    return () => { queryRequestRef.current++; };
+  }, [currentDslQuery, queryScope, selectionHash, cadDwgName, cadConnected, settingsReady]);
 
   // CAD Visual Filter: Dark Grey (ACI 8) for unchecked entities, restore original _clr when OFF
   useEffect(() => {
@@ -426,9 +456,9 @@ export default function WbsReportView({
         });
         if (!cancel) {
           if (filterModeActive) {
-            setStatusMsg(`Filter: ${checkedHandles.length} normal, ${allHandles.length - checkedHandles.length} dark grey`);
+            setStatusMsg(`Filter: ${checkedHandles.length} normal, ${allHandles.length - checkedHandles.length} dark gray`);
           } else {
-            setStatusMsg('Warna entitas CAD dipulihkan');
+            setStatusMsg('CAD entity colors restored');
           }
           setTimeout(() => setStatusMsg(''), 2000);
         }
@@ -495,17 +525,17 @@ export default function WbsReportView({
 
   const handleAddNewQueryForm = () => {
     setEditingQueryId(null);
-    setQueryFormName('Query DSL Baru');
+    setQueryFormName('New Query DSL');
     setQueryFormDsl("{e.data.props.floor : {all: {qty: += e.l, unit: 'm'}}}");
   };
 
   const handleSaveQueryForm = () => {
     if (!queryFormName.trim()) {
-      alert('Nama query tidak boleh kosong.');
+      alert('The query name cannot be empty.');
       return;
     }
     if (!queryFormDsl.trim()) {
-      alert('Ekspresi DSL query tidak boleh kosong.');
+      alert('The Query DSL expression cannot be empty.');
       return;
     }
 
@@ -528,16 +558,16 @@ export default function WbsReportView({
     }
 
     persistQueries(updated);
-    setStatusMsg('Query berhasil disimpan!');
+    setStatusMsg('Query updated.');
     setTimeout(() => setStatusMsg(''), 2000);
   };
 
   const handleDeleteQueryForm = (idToDelete) => {
     if (savedQueries.length <= 1) {
-      alert('Minimal harus ada 1 query tersimpan.');
+      alert('At least one saved query is required.');
       return;
     }
-    if (!window.confirm('Hapus query DSL ini?')) return;
+    if (!window.confirm('Delete this Query DSL?')) return;
 
     const updated = savedQueries.filter((q) => q.id !== idToDelete);
     persistQueries(updated);
@@ -634,7 +664,7 @@ export default function WbsReportView({
               </span>
             )}
 
-            {/* Checkbox (Requirement 3: Checkbox hanya yang punya kuantitas saat Filter button ON) */}
+            {/* Show checkboxes only for quantity items while the visual filter is on. */}
             {filterModeActive && hasQty && (
               <input
                 type="checkbox"
@@ -664,7 +694,7 @@ export default function WbsReportView({
                   <button
                     type="button"
                     onClick={() => handleOpenDescription(codeKey)}
-                    title={`Klik untuk lihat / edit deskripsi kode ${codeKey} (SQLite)`}
+                    title={`Click to view or edit the description for code ${codeKey} (SQLite)`}
                     className="px-1.5 py-0.2 text-[10px] font-mono bg-sky-950/60 hover:bg-sky-900/80 text-sky-400 hover:text-sky-300 border border-sky-800/40 rounded shrink-0 flex items-center gap-1 transition-colors"
                   >
                     <span>{codeKey}</span>
@@ -687,7 +717,7 @@ export default function WbsReportView({
             </div>
           </div>
 
-          {/* Right Columns: KUANTITAS & SATUAN */}
+          {/* Right Columns: QUANTITY & UNIT */}
           <div className="flex items-center gap-4 shrink-0 pr-6">
             {/* Quantity */}
             <div className="w-24 text-right">
@@ -723,8 +753,18 @@ export default function WbsReportView({
     );
   };
 
+  if (!settingsReady) return (
+    <div className="flex-1 min-h-0 p-4 bg-[#111620] text-slate-300 text-xs">
+      {persistenceError ? <>
+        <p role="alert" className="text-rose-300">Could not load this project's report settings: {persistenceError}</p>
+        <button type="button" className="btn mt-3" onClick={() => setSettingsLoadAttempt((value) => value + 1)}>Retry</button>
+      </> : <p role="status">Loading project report?</p>}
+    </div>
+  );
+
   return (
     <div className="flex-1 flex flex-col bg-[#111620] text-slate-200 min-h-0 overflow-hidden font-sans select-none">
+      {persistenceError && <p role="alert" className="p-3 text-xs text-rose-300">{persistenceError}</p>}
       {/* ====================================================================
           1. HEADER BAR
       ==================================================================== */}
@@ -742,13 +782,7 @@ export default function WbsReportView({
                 </span>
               )}
             </h1>
-            <input
-              type="text"
-              value={projectTitle}
-              onChange={(e) => setProjectTitle(e.target.value)}
-              title="Edit Project / Drawing Title"
-              className="text-[11px] text-slate-400 bg-transparent hover:bg-[#1a2130] focus:bg-[#1a2130] px-1 py-0.5 rounded border border-transparent focus:border-slate-700 outline-none w-72 truncate transition-colors"
-            />
+            <p className="text-[11px] text-slate-400 px-1 py-0.5 truncate" title={project.path}>{project.name}</p>
           </div>
         </div>
 
@@ -756,11 +790,11 @@ export default function WbsReportView({
         <div className="flex items-center gap-2 shrink-0">
           <button
             onClick={handleOpenCrudModal}
-            title="Kelola Query DSL (Create, Edit, Delete, Save)"
+            title="Manage Query DSL (create, edit, delete, save)"
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-white text-[#10141d] hover:bg-slate-100 font-semibold text-xs transition-colors shadow-sm"
           >
             <Database className="w-3.5 h-3.5 text-sky-600" />
-            <span>Kelola Query DSL</span>
+            <span>Manage Query DSL</span>
           </button>
 
           <button
@@ -774,11 +808,11 @@ export default function WbsReportView({
       </header>
 
       {/* ====================================================================
-          2. TOOLBAR: Gambar 2 Dropdown (Only DSL Queries) + Pill (Selection/All) + Filter Button
+          2. TOOLBAR: Query Dropdown + Scope Selection + Filter Button
       ==================================================================== */}
       <div className="bg-[#131822] border-b border-[#1c2333] px-4 py-2.5 flex flex-wrap items-center justify-between gap-2.5 shrink-0">
         <div className="flex items-center gap-2.5 flex-1 min-w-[320px]">
-          {/* Gambar 2: Dropdown ONLY DSL Queries */}
+          {/* Query dropdown */}
           <div className="relative">
             <select
               value={activeQueryId}
@@ -801,7 +835,7 @@ export default function WbsReportView({
               type="button"
               onClick={handlePickSelection}
               disabled={isLoading}
-              title="Klik untuk mengambil objek yang sedang dipilih di CAD dan menjalankan query DSL"
+              title="Get the current CAD selection and run the Query DSL"
               className={`px-3 py-1.5 rounded-md text-xs font-semibold flex items-center gap-1.5 border transition-all ${
                 queryScope === 'selection'
                   ? 'bg-amber-500/25 text-amber-300 border-amber-500/70 shadow-sm shadow-amber-500/20'
@@ -816,7 +850,7 @@ export default function WbsReportView({
               type="button"
               onClick={handleQueryAll}
               disabled={isLoading}
-              title="Klik untuk menjalankan query DSL pada seluruh gambar CAD"
+              title="Run the Query DSL on the entire CAD drawing"
               className={`px-3 py-1.5 rounded-md text-xs font-semibold flex items-center gap-1.5 border transition-all ${
                 queryScope === 'all'
                   ? 'bg-sky-500/25 text-sky-300 border-sky-500/70 shadow-sm shadow-sky-500/20'
@@ -833,7 +867,7 @@ export default function WbsReportView({
             <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2" />
             <input
               type="text"
-              placeholder="Cari item pekerjaan / kode..."
+              placeholder="Search item description or code..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="w-full bg-[#19202c] border border-slate-700/80 focus:border-sky-500 rounded-md pl-8 pr-7 py-1.5 text-xs text-slate-200 placeholder-slate-500 outline-none transition-colors"
@@ -872,8 +906,8 @@ export default function WbsReportView({
             onClick={() => setFilterModeActive((prev) => !prev)}
             title={
               filterModeActive
-                ? 'Filter Aktif: Unchecked entities diberi warna Dark Grey (Klik untuk OFF & restore warna)'
-                : 'Klik untuk aktifkan Filter Seleksi & Checkbox (Unchecked diberi warna Dark Grey)'
+                ? 'Filter active: unchecked entities are dark gray (click to turn off and restore colors)'
+                : 'Click to enable selection and checkbox filtering (unchecked entities appear dark gray)'
             }
             className={`flex items-center gap-1.5 px-3 py-1 rounded-md text-xs font-semibold border transition-all ${
               filterModeActive
@@ -882,7 +916,7 @@ export default function WbsReportView({
             }`}
           >
             <Filter className="w-3.5 h-3.5" />
-            <span>{filterModeActive ? 'Filter Visual: ON' : 'Filter Visual'}</span>
+            <span>{filterModeActive ? 'Visual Filter: ON' : 'Visual Filter'}</span>
           </button>
         </div>
       </div>
@@ -891,10 +925,10 @@ export default function WbsReportView({
           3. TREEVIEW TABLE HEADER
       ==================================================================== */}
       <div className="bg-[#151a24] border-b border-[#21293a] px-4 py-2 flex items-center justify-between text-[11px] font-bold text-slate-400 uppercase tracking-wider shrink-0">
-        <div className="flex-1">PEKERJAAN (HASIL QUERY DSL)</div>
+        <div className="flex-1">ITEM (QUERY DSL RESULT)</div>
         <div className="flex items-center gap-4 pr-6">
-          <div className="w-24 text-right">KUANTITAS</div>
-          <div className="w-16 text-left">SATUAN</div>
+          <div className="w-24 text-right">QUANTITY</div>
+          <div className="w-16 text-left">UNIT</div>
         </div>
       </div>
 
@@ -907,14 +941,14 @@ export default function WbsReportView({
         ) : (
           <div className="p-8 text-center text-slate-500 text-xs">
             {isLoading
-              ? 'Mengevaluasi SS-QUERY di CAD...'
-              : 'Tidak ada hasil query. Pastikan objek CAD terpilih atau sesuaikan ekspresi query DSL.'}
+              ? 'Evaluating SS-QUERY in CAD...'
+              : 'No query results. Select CAD objects or adjust the Query DSL expression.'}
           </div>
         )}
       </div>
 
       {/* ====================================================================
-          5. MODAL: GAMBAR 3 CRUD MANAGER QUERY DSL
+          5. MODAL: QUERY DSL MANAGER
       ==================================================================== */}
       {showCrudModal && (
         <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
@@ -924,7 +958,7 @@ export default function WbsReportView({
               <div className="flex items-center gap-2">
                 <Database className="w-4 h-4 text-sky-400" />
                 <h3 className="text-sm font-bold text-white tracking-wide">
-                  Kelola Query DSL (SS-QUERY)
+                  Manage Query DSL (SS-QUERY)
                 </h3>
               </div>
               <button
@@ -940,14 +974,14 @@ export default function WbsReportView({
               {/* Left Column: Saved Queries List */}
               <div className="w-56 flex flex-col border-r border-slate-700/80 pr-3">
                 <div className="flex items-center justify-between mb-2">
-                  <span className="text-[11px] font-bold text-slate-400 uppercase">Daftar Query</span>
+                  <span className="text-[11px] font-bold text-slate-400 uppercase">Saved Queries</span>
                   <button
                     type="button"
                     onClick={handleAddNewQueryForm}
                     className="p-1 rounded bg-sky-500/20 hover:bg-sky-500/30 text-sky-300 text-[10px] flex items-center gap-1 font-semibold"
                   >
                     <Plus className="w-3 h-3" />
-                    <span>Tambah</span>
+                    <span>Add</span>
                   </button>
                 </div>
                 <div className="flex-1 overflow-y-auto space-y-1">
@@ -974,13 +1008,13 @@ export default function WbsReportView({
               <div className="flex-1 flex flex-col space-y-3">
                 <div>
                   <label className="block text-xs font-medium text-slate-300 mb-1">
-                    Nama / Judul Query:
+                    Query Name / Title:
                   </label>
                   <input
                     type="text"
                     value={queryFormName}
                     onChange={(e) => setQueryFormName(e.target.value)}
-                    placeholder="Contoh: Dinding Luas per Lantai"
+                    placeholder="e.g. Wall Area by Floor"
                     className="w-full bg-[#0d1117] border border-slate-700 px-3 py-1.5 rounded text-xs text-slate-200 focus:outline-none focus:border-sky-500"
                   />
                 </div>
@@ -1017,13 +1051,13 @@ export default function WbsReportView({
                         type="button"
                         onClick={() =>
                           setQueryFormDsl(
-                            "{e.lyr : {total: {panjang: {qty: += e.l, unit: 'm'}, luas: {qty: += e.a, unit: 'm²'}}}}"
+                            "{e.lyr : {total: {length: {qty: += e.l, unit: 'm'}, area: {qty: += e.a, unit: 'm²'}}}}"
                           )
                         }
                         className="text-[10px] font-mono text-emerald-400 hover:text-emerald-300"
-                        title="Template Area & Panjang per Layer"
+                        title="Area & Length by Layer template"
                       >
-                        [Template Area & Panjang]
+                        [Area & Length Template]
                       </button>
                     </div>
                   </div>
@@ -1048,7 +1082,7 @@ export default function WbsReportView({
                   className="flex items-center gap-1 px-3 py-1.5 rounded bg-rose-950/40 hover:bg-rose-900/60 text-rose-300 border border-rose-800/40 text-xs transition-colors"
                 >
                   <Trash2 className="w-3.5 h-3.5" />
-                  <span>Hapus</span>
+                  <span>Delete</span>
                 </button>
               )}
 
@@ -1058,7 +1092,7 @@ export default function WbsReportView({
                   onClick={() => setShowCrudModal(false)}
                   className="px-3 py-1.5 rounded bg-[#1c2333] hover:bg-[#252f44] text-xs text-slate-300 transition-colors"
                 >
-                  Batal
+                  Cancel
                 </button>
                 <button
                   type="button"
@@ -1066,7 +1100,7 @@ export default function WbsReportView({
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-[#1e2533] hover:bg-[#293245] border border-slate-600 text-white font-medium text-xs transition-colors"
                 >
                   <Save className="w-3.5 h-3.5" />
-                  <span>Simpan</span>
+                  <span>Save</span>
                 </button>
                 <button
                   type="button"
@@ -1074,7 +1108,7 @@ export default function WbsReportView({
                   className="flex items-center gap-1.5 px-4 py-1.5 rounded bg-sky-500 hover:bg-sky-600 text-white font-semibold text-xs shadow transition-colors"
                 >
                   <Check className="w-3.5 h-3.5" />
-                  <span>Jalankan di CAD (Terapkan)</span>
+                  <span>Run in CAD (Apply)</span>
                 </button>
               </div>
             </div>
@@ -1083,7 +1117,7 @@ export default function WbsReportView({
       )}
 
       {/* ====================================================================
-          6. MODAL: GAMBAR 5 KELOLA DESKRIPSI (SQLite)
+          6. MODAL: MANAGE DESCRIPTIONS (SQLite)
       ==================================================================== */}
       <DescriptionModal
         isOpen={descModalOpen}
@@ -1092,7 +1126,7 @@ export default function WbsReportView({
         descriptions={descriptions}
         onSaveDescription={onSaveDescription}
         onDeleteDescription={onDeleteDescription}
-        cadConnected={cadConnected}
+        projectPath={project.path}
       />
     </div>
   );

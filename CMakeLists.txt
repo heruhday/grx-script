@@ -277,3 +277,5 @@ target_include_directories(test_query_dsl PRIVATE
   "${CMAKE_CURRENT_SOURCE_DIR}/third_party/quickjs"
 )
 target_link_libraries(test_query_dsl PRIVATE query_dsl quickjs)
+
+add_executable(test_ipc_request test/test_ipc_request.cpp)

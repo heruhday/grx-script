@@ -1,0 +1,86 @@
+.drawing-details-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 260;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 12px;
+  background: rgb(0 0 0 / 75%);
+}
+
+.drawing-details-modal {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  width: min(100%, 760px);
+  min-width: 0;
+  max-height: 100%;
+  overflow: hidden;
+  border: 1px solid #3a4658;
+  border-radius: 10px;
+  background: #151a24;
+  color: #edf3fa;
+  box-shadow: 0 20px 70px rgb(0 0 0 / 55%);
+  font-size: 14px;
+  outline: none;
+}
+
+.drawing-details-modal * { box-sizing: border-box; }
+.drawing-details-header, .drawing-details-footer { flex-shrink: 0; padding: 14px 16px; }
+.drawing-details-header { display: flex; align-items: center; gap: 12px; justify-content: space-between; border-bottom: 1px solid #35404d; }
+.drawing-details-header h2 { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 17px; font-weight: 700; }
+.drawing-details-header h2 svg { width: 19px; height: 19px; flex-shrink: 0; color: #45dbb4; }
+.drawing-details-close { display: flex; padding: 5px; border: 0; border-radius: 5px; color: #a8b4c2; background: transparent; cursor: pointer; }
+.drawing-details-close svg { width: 20px; height: 20px; }
+.drawing-details-close:hover { background: #283243; color: white; }
+.drawing-details-content { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 16px; }
+.drawing-details-file { display: flex; flex-direction: column; gap: 5px; margin-bottom: 18px; padding: 11px 12px; border: 1px solid #344457; border-radius: 6px; background: #101620; }
+.drawing-details-file strong { overflow-wrap: anywhere; font-size: 15px; }
+.drawing-details-file span { color: #a8b4c2; font-size: 12px; overflow-wrap: anywhere; user-select: text; }
+.drawing-details-form, .drawing-details-entry-form { display: flex; flex-direction: column; gap: 7px; }
+.drawing-details-modal label { color: #cbd5e1; font-size: 13px; font-weight: 600; }
+.drawing-details-form label:not(:first-child) { margin-top: 6px; }
+.drawing-details-modal input, .drawing-details-modal textarea, .drawing-details-modal select { width: 100%; min-width: 0; margin: 0; padding: 9px 10px; border: 1px solid #41516a; border-radius: 5px; background: #0d1117; color: #edf3fa; font: inherit; line-height: 1.5; }
+.drawing-details-modal textarea { display: block; resize: vertical; min-height: 80px; }
+.drawing-details-modal textarea::placeholder, .drawing-details-modal input::placeholder { color: #7c8c9e; }
+.drawing-details-modal :is(button, input, textarea, select):focus-visible { outline: 2px solid #34d3ac; outline-offset: 2px; }
+.drawing-details-modal :is(button, input, textarea, select):disabled { opacity: .5; cursor: not-allowed; }
+.drawing-details-saved { margin: 3px 0 0; color: #93a4b7; font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
+.drawing-details-saved strong { color: #c4cfdd; font-weight: 500; }
+.drawing-details-entries { margin-top: 20px; padding-top: 16px; border-top: 1px solid #35404d; }
+.drawing-details-entries h3 { display: flex; align-items: center; gap: 7px; margin: 0 0 12px; font-size: 15px; font-weight: 700; }
+.drawing-details-entries h3 svg { width: 17px; height: 17px; color: #45dbb4; }
+.drawing-details-empty { margin: 0 0 14px; color: #93a4b7; font-size: 13px; }
+.drawing-details-history { display: flex; flex-direction: column; gap: 9px; margin: 0 0 16px; padding: 0; list-style: none; }
+.drawing-details-entry { min-width: 0; padding: 11px 12px; border: 1px solid #303d50; border-radius: 6px; background: #111721; }
+.drawing-details-entry-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 9px; color: #a8b4c2; font-size: 12px; }
+.drawing-details-entry-meta strong { color: #d2dce8; font-weight: 600; overflow-wrap: anywhere; }
+.drawing-details-entry-meta time { color: #93a4b7; }
+.drawing-details-kind { padding: 2px 6px; border-radius: 4px; background: #163f4d; color: #9be4f0; font-size: 11px; font-weight: 600; }
+.drawing-details-kind.is-note { background: #493a1c; color: #f1d28b; }
+.drawing-details-entry p { margin: 8px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.6; }
+.drawing-details-entry-form select { width: fit-content; min-width: 125px; margin-bottom: 4px; }
+.drawing-details-entry-actions { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; margin-top: 3px; }
+.drawing-details-entry-actions > span { color: #93a4b7; font-size: 12px; }
+.drawing-details-button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 34px; padding: 7px 11px; border: 1px solid #43516a; border-radius: 5px; background: #202b3c; color: #dce6f2; font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; }
+.drawing-details-button:hover:not(:disabled) { background: #2b3a50; }
+.drawing-details-button.primary { border-color: #139775; background: #087d61; color: white; }
+.drawing-details-button.primary:hover:not(:disabled) { background: #109a78; }
+.drawing-details-button svg { width: 15px; height: 15px; flex-shrink: 0; }
+.drawing-details-footer { display: flex; flex-direction: column; gap: 10px; border-top: 1px solid #35404d; background: #111722; }
+.drawing-details-feedback { min-width: 0; }
+.drawing-details-feedback:empty { display: none; }
+.drawing-details-feedback p { margin: 0 0 3px; font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
+.drawing-details-error { color: #fca5a5; }
+.drawing-details-status { margin: 0 0 12px; color: #6ee7b7; font-size: 13px; }
+.drawing-details-draft { color: #f1d28b; }
+.drawing-details-footer-actions { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 8px; }
+
+@media (max-width: 420px) {
+  .drawing-details-backdrop { padding: 7px; }
+  .drawing-details-header, .drawing-details-footer, .drawing-details-content { padding: 12px; }
+  .drawing-details-header h2 { font-size: 16px; }
+  .drawing-details-entry-actions { align-items: stretch; }
+  .drawing-details-entry-actions > span { width: 100%; }
+}

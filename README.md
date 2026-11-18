@@ -33,11 +33,17 @@ An AutoCAD ObjectARX / GstarCAD GRX C++ plugin running an embedded **QuickJS** E
 
 The included PowerShell build script handles configuration, compilation, and distribution packaging:
 
-### 1. Default Build (AutoCAD 2018 & GstarCAD 2026)
+### 1. Default Build (AutoCAD 2021)
 ```powershell
 .\build.ps1
 ```
-*Builds default targets: AutoCAD 2018 (`qjs_2018.arx`) and GstarCAD 2026 (`qjs_2026.grx`).*
+*Builds AutoCAD 2021 (`qjs_2021.arx`).*
+
+The QTO desktop app is optional and is not included in the default build. To build and package it with the AutoCAD target:
+```powershell
+.\build.ps1 -BuildUI
+```
+For a clean build that includes the QTO app, use `.\build.ps1 -Clean -BuildUI`.
 
 ### 2. Clean Build
 ```powershell
@@ -57,11 +63,27 @@ The included PowerShell build script handles configuration, compilation, and dis
 .\build.ps1 -GstarCAD          # GstarCAD 2026
 ```
 
-### 5. Direct CMake Build
+### 5. Clean Source ZIP
 ```powershell
-# AutoCAD 2018
-cmake -S . -B build_2018 -DAUTOCAD_VERSION=2018
-cmake --build build_2018 --config Release
+.\build.ps1 -Zip
+.\build.ps1 -Zip -OutDir zips   # Optional output folder
+```
+Creates `dist/grx-script-source.zip` with a single `grx-script/` folder containing
+the current source, including new and modified files, documentation, tests, lockfiles,
+and bundled third-party sources. It excludes build outputs, `node_modules`, Rust
+`target`, caches, Git/editor metadata, local databases and their sidecars, and private
+`.env` files. `.env.example`, `.env.sample`, and `.env.template` remain included.
+Symbolic links and junctions are skipped; OneDrive source files remain included.
+
+This option does not compile or delete existing files and needs only PowerShell/.NET.
+It runs separately from build options such as `-Clean`, `-All`, and `-BuildUI`.
+The archive name follows the project folder if it is renamed.
+
+### 6. Direct CMake Build
+```powershell
+# AutoCAD 2021
+cmake -S . -B build_2021 -DAUTOCAD_VERSION=2021
+cmake --build build_2021 --config Release
 
 # GstarCAD 2026
 cmake -S . -B build_gcad -DCAD_PLATFORM=GSTARCAD
@@ -69,13 +91,13 @@ cmake --build build_gcad --config Release
 ```
 
 **Build Artifacts (`dist/`):**
-- `dist/2018/qjs_2018.arx` + `WebView2Loader.dll`
+- `dist/2021/qjs_2021.arx` + `WebView2Loader.dll`
 - `dist/gstarcad_2026/qjs_2026.grx` + `WebView2Loader.dll`
 - `dist/bin/qjs_*.arx` and `dist/bin/qjs_*.grx`
 - `dist/arx-script.bundle/`: Ready-to-deploy Autoloader package for `%APPDATA%\Autodesk\ApplicationPlugins\`
 - `dist/runjs.lsp`: Multi-version AutoLISP loader with auto-detection
 
-### 5. Run Native QuickJS DSL Tests
+### 7. Run Native QuickJS DSL Tests
 A standalone executable tests the native C++ DSL library without requiring AutoCAD or GstarCAD to be open:
 ```powershell
 .\build_2021\Release\test_query_dsl.exe

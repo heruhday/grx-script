@@ -10,4 +10,6 @@ namespace selection_event
     void uninstall();
     uint64_t getSelectionVersion();
     std::vector<std::string> getSelectedHandles();
+    bool syncImpliedSelection();
+    void notifySelectionModified();
 }

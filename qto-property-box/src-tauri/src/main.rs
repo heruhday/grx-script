@@ -5,6 +5,26 @@ use serde_json::Value;
 use std::io::{Read, Write};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, TcpStream};
 use std::time::Duration;
+mod general_states;
+
+mod project_store;
+mod project_commands;
+mod drawing_details;
+
+#[tauri::command]
+fn list_general_states(project_path: String) -> Result<Vec<general_states::GeneralState>, String> {
+    general_states::list(&project_store::database_path(std::path::Path::new(&project_path))?)
+}
+
+#[tauri::command]
+fn save_general_state(project_path: String, state: general_states::GeneralState) -> Result<general_states::GeneralState, String> {
+    general_states::save(&project_store::database_path(std::path::Path::new(&project_path))?, state)
+}
+
+#[tauri::command]
+fn delete_general_state(project_path: String, name: String) -> Result<(), String> {
+    general_states::delete(&project_store::database_path(std::path::Path::new(&project_path))?, &name)
+}
 
 const DEFAULT_IPC_PORT: u16 = 8123;
 
@@ -14,7 +34,8 @@ fn eval_in_cad_ipc(port: u16, script: &str) -> Result<Value, String> {
     let mut stream = TcpStream::connect_timeout(&addr, Duration::from_millis(1000))
         .map_err(|e| format!("CAD IPC not connected (127.0.0.1:{}): {}", port, e))?;
 
-    let _ = stream.set_read_timeout(Some(Duration::from_millis(25000)));
+    let read_timeout_ms = if script.starts_with("QTO_OPEN_DWG\n") { 185000 } else { 25000 };
+    let _ = stream.set_read_timeout(Some(Duration::from_millis(read_timeout_ms)));
     let _ = stream.set_write_timeout(Some(Duration::from_millis(5000)));
 
     stream
@@ -32,8 +53,12 @@ fn eval_in_cad_ipc(port: u16, script: &str) -> Result<Value, String> {
         return Ok(Value::Null);
     }
 
-    serde_json::from_str::<Value>(&response)
-        .map_err(|e| format!("Invalid JSON from CAD IPC: {} (raw: {})", e, response))
+    let value = serde_json::from_str::<Value>(&response)
+        .map_err(|e| format!("Invalid JSON from CAD IPC: {} (raw: {})", e, response))?;
+    if let Some(error) = value.get("error") {
+        return Err(error.as_str().map(str::to_owned).unwrap_or_else(|| error.to_string()));
+    }
+    Ok(value)
 }
 
 #[tauri::command]
@@ -72,18 +97,23 @@ fn cad_select_handles(handles: Vec<String>, zoom: bool, port: Option<u16>) -> Re
 struct EntityXdataPatch {
     handle: String,
     data: Value,
+    #[serde(default)]
+    properties: Option<Value>,
 }
 
 #[tauri::command]
 fn cad_apply_qto_xdata(patches: Vec<EntityXdataPatch>, port: Option<u16>) -> Result<Value, String> {
+    if patches.is_empty() || patches.iter().any(|patch| patch.handle.trim().is_empty()) {
+        return Err("XData updates require a valid entity handle for every selected object".to_string());
+    }
     let patches_json = serde_json::to_string(&patches).map_err(|e| e.to_string())?;
     let js = format!(
         "(() => {{ \
             const items = {}; \
             const updated = []; \
             for (const item of items) {{ \
-                entity.set(item.handle, {{ data: null }}); \
-                entity.set(item.handle, {{ data: item.data }}); \
+                entity.set({{ hand: item.handle, data: null }}); \
+                entity.set({{ ...(item.properties || {{}}), hand: item.handle, data: item.data }}); \
                 updated.push(item.handle); \
             }} \
             return {{ ok: true, count: updated.length, handles: updated }}; \
@@ -164,98 +194,6 @@ fn cad_run_ss_query(
 }
 
 #[tauri::command]
-fn cad_get_descriptions(port: Option<u16>) -> Result<Value, String> {
-    let js = r#"(() => {
-        try {
-            const { DatabaseSync } = require('sqlite');
-            const dbPath = 'C:/Users/Heruh/source/arx-script/grx-script/qto_descriptions.db';
-            const db = new DatabaseSync(dbPath);
-            db.exec(`CREATE TABLE IF NOT EXISTS deskripsi (
-                code TEXT PRIMARY KEY,
-                items TEXT,
-                short TEXT,
-                full TEXT
-            );`);
-            const rows = db.prepare('SELECT * FROM deskripsi').all();
-            const map = {};
-            for (const r of rows) {
-                let itemsArr = [];
-                try {
-                    itemsArr = JSON.parse(r.items);
-                } catch {
-                    itemsArr = r.items ? [r.items] : [];
-                }
-                map[r.code] = {
-                    items: itemsArr,
-                    short: r.short || '',
-                    full: r.full || ''
-                };
-            }
-            return map;
-        } catch (e) {
-            return { error: String(e) };
-        }
-    })()"#;
-    eval_in_cad_ipc(port.unwrap_or(DEFAULT_IPC_PORT), js)
-}
-
-#[tauri::command]
-fn cad_save_description(
-    code: String,
-    items: Vec<String>,
-    short: String,
-    full: String,
-    port: Option<u16>,
-) -> Result<Value, String> {
-    let items_json = serde_json::to_string(&items).unwrap_or_else(|_| "[]".to_string());
-    let js = format!(
-        r#"(() => {{
-            try {{
-                const {{ DatabaseSync }} = require('sqlite');
-                const dbPath = 'C:/Users/Heruh/source/arx-script/grx-script/qto_descriptions.db';
-                const db = new DatabaseSync(dbPath);
-                db.exec(`CREATE TABLE IF NOT EXISTS deskripsi (
-                    code TEXT PRIMARY KEY,
-                    items TEXT,
-                    short TEXT,
-                    full TEXT
-                );`);
-                const stmt = db.prepare('INSERT OR REPLACE INTO deskripsi (code, items, short, full) VALUES (?, ?, ?, ?)');
-                stmt.run({}, {}, {}, {});
-                return {{ ok: true }};
-            }} catch (e) {{
-                return {{ error: String(e) }};
-            }}
-        }})()"#,
-        serde_json::to_string(&code).unwrap(),
-        serde_json::to_string(&items_json).unwrap(),
-        serde_json::to_string(&short).unwrap(),
-        serde_json::to_string(&full).unwrap()
-    );
-    eval_in_cad_ipc(port.unwrap_or(DEFAULT_IPC_PORT), &js)
-}
-
-#[tauri::command]
-fn cad_delete_description(code: String, port: Option<u16>) -> Result<Value, String> {
-    let js = format!(
-        r#"(() => {{
-            try {{
-                const {{ DatabaseSync }} = require('sqlite');
-                const dbPath = 'C:/Users/Heruh/source/arx-script/grx-script/qto_descriptions.db';
-                const db = new DatabaseSync(dbPath);
-                const stmt = db.prepare('DELETE FROM deskripsi WHERE code = ?');
-                stmt.run({});
-                return {{ ok: true }};
-            }} catch (e) {{
-                return {{ error: String(e) }};
-            }}
-        }})()"#,
-        serde_json::to_string(&code).unwrap()
-    );
-    eval_in_cad_ipc(port.unwrap_or(DEFAULT_IPC_PORT), &js)
-}
-
-#[tauri::command]
 fn set_always_on_top(window: tauri::Window, always_on_top: bool) -> Result<(), String> {
     window
         .set_always_on_top(always_on_top)
@@ -276,6 +214,26 @@ fn main() {
     }));
     if let Err(e) = tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
+            project_commands::list_recent_projects,
+            project_commands::create_project,
+            project_commands::open_project,
+            project_commands::load_project,
+            project_commands::list_project_drawings,
+            project_commands::add_project_drawings,
+            project_commands::add_open_cad_drawings,
+            project_commands::remove_project_drawings,
+            project_commands::open_project_drawing,
+            project_commands::get_project_setting,
+            project_commands::save_project_setting,
+            project_commands::list_project_descriptions,
+            project_commands::save_project_description,
+            project_commands::delete_project_description,
+            project_commands::get_drawing_details,
+            project_commands::save_drawing_details,
+            project_commands::add_drawing_entry,
+            list_general_states,
+            save_general_state,
+            delete_general_state,
             cad_eval,
             cad_poll_selection,
             cad_select_layer,
@@ -283,9 +241,6 @@ fn main() {
             cad_apply_qto_xdata,
             cad_filter_entities_color,
             cad_run_ss_query,
-            cad_get_descriptions,
-            cad_save_description,
-            cad_delete_description,
             set_always_on_top
         ])
         .run(tauri::generate_context!()) {

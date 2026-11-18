@@ -4,8 +4,9 @@
 
 .DESCRIPTION
     Automates CMake configuration and compilation.
-    By default, builds for AutoCAD 2018 and GstarCAD 2026.
+    By default, builds for AutoCAD 2021.
     Use -All to build all supported AutoCAD versions (2017-2024) and GstarCAD 2026.
+    Use -Zip to archive the current source without building or deleting files.
 
 .PARAMETER Version
     Specific CAD version to build:
@@ -22,15 +23,26 @@
 .PARAMETER Clean
     Cleans build_* and dist directories before compiling.
 
+.PARAMETER Zip
+    Creates <project-folder>-source.zip in OutDir (default: dist).
+    Includes current source and bundled dependencies; excludes build outputs,
+    caches, version-control data, local databases, and private environment files.
+    Runs without CMake, CAD SDKs, Node, Rust, or Git.
+
 .PARAMETER Config
     Build configuration (Release or Debug). Default is Release.
 
+.PARAMETER OutDir
+    Output folder, relative to this script or absolute. Default is dist.
+
 .EXAMPLE
-    .\build.ps1                    # Builds default: AutoCAD 2018 & GstarCAD 2026
+    .\build.ps1                    # Builds default: AutoCAD 2021
     .\build.ps1 -Clean             # Cleans old builds, then builds default targets
     .\build.ps1 -All               # Builds all AutoCAD (2017..2024) & GstarCAD 2026
     .\build.ps1 -Version 2018      # Builds AutoCAD 2018
     .\build.ps1 -GstarCAD          # Builds GstarCAD 2026
+    .\build.ps1 -Zip               # Creates dist/<project-folder>-source.zip
+    .\build.ps1 -Zip -OutDir zips  # Creates the source ZIP in zips/
 #>
 
 [CmdletBinding(DefaultParameterSetName = "Default")]
@@ -45,13 +57,112 @@ param(
     [Parameter(ParameterSetName = "All")]
     [switch]$All,
 
+    [Parameter(ParameterSetName = "Zip", Mandatory = $true)]
+    [switch]$Zip,
+
+    [Parameter(ParameterSetName = "Default")]
+    [Parameter(ParameterSetName = "SpecificVersion")]
+    [Parameter(ParameterSetName = "GstarCAD")]
+    [Parameter(ParameterSetName = "All")]
     [switch]$Clean,
+
+    [Parameter(ParameterSetName = "Default")]
+    [Parameter(ParameterSetName = "SpecificVersion")]
+    [Parameter(ParameterSetName = "GstarCAD")]
+    [Parameter(ParameterSetName = "All")]
     [switch]$BuildUI,
+
+    [Parameter(ParameterSetName = "Default")]
+    [Parameter(ParameterSetName = "SpecificVersion")]
+    [Parameter(ParameterSetName = "GstarCAD")]
+    [Parameter(ParameterSetName = "All")]
     [string]$Config = "Release",
+
+    [ValidateNotNullOrEmpty()]
     [string]$OutDir = "dist"
 )
 
 $ErrorActionPreference = "Stop"
+
+$scriptRoot = $PSScriptRoot
+if (-not $scriptRoot) { $scriptRoot = (Get-Location).Path }
+
+function New-SourceArchive([string]$SourceRoot, [string]$OutputDirectory) {
+    Add-Type -AssemblyName System.IO.Compression
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+
+    $source = Get-Item -LiteralPath $SourceRoot
+    $sourcePath = $source.FullName.TrimEnd('\', '/')
+    $projectName = $source.Name
+    $outputPath = if ([System.IO.Path]::IsPathRooted($OutputDirectory)) {
+        [System.IO.Path]::GetFullPath($OutputDirectory)
+    } else {
+        [System.IO.Path]::GetFullPath((Join-Path $sourcePath $OutputDirectory))
+    }
+    if ($outputPath.Length -gt [System.IO.Path]::GetPathRoot($outputPath).Length) {
+        $outputPath = $outputPath.TrimEnd('\', '/')
+    }
+    New-Item -ItemType Directory -Path $outputPath -Force | Out-Null
+    $archiveName = "$projectName-source.zip"
+    $archivePath = Join-Path $outputPath $archiveName
+    $temporaryPath = "$archivePath.$([guid]::NewGuid().ToString('N')).tmp"
+    $excludedDirectories = @(
+        '.git', '.hg', '.svn', '.vs', '.vscode', '.idea', '.codex', '.agents',
+        '.aws', '.azure', '.ssh', '.nuget', '.cache', '.vite', '.parcel-cache',
+        '.turbo', '.next', '.nuxt', '.svelte-kit', '__pycache__', '.pytest_cache',
+        '.mypy_cache', '.ruff_cache', 'node_modules', 'target', 'dist', 'bin',
+        'obj', 'x64', 'ARM64', 'Debug', 'Release', 'scratch', 'coverage', 'htmlcov',
+        'TestResults', 'test-results', 'playwright-report', 'CMakeFiles', '_CPack_Packages'
+    )
+    $count = 0
+    try {
+        $archive = [System.IO.Compression.ZipFile]::Open($temporaryPath, [System.IO.Compression.ZipArchiveMode]::Create)
+        try {
+            $pending = [System.Collections.Generic.Stack[System.IO.DirectoryInfo]]::new()
+            $pending.Push($source)
+            while ($pending.Count -gt 0) {
+                foreach ($item in (Get-ChildItem -LiteralPath $pending.Pop().FullName -Force | Sort-Object Name)) {
+                    # OneDrive placeholders are also reparse points; only skip actual links/junctions.
+                    if ($item.LinkType) { continue }
+                    $relativePath = $item.FullName.Substring($sourcePath.Length + 1).Replace('\', '/')
+                    if ($item.PSIsContainer) {
+                        if ($item.Name -in $excludedDirectories -or $item.Name -match '^(build($|[_-])|cmake-build-)' -or
+                            $relativePath -eq 'qto-property-box/src-tauri/gen' -or
+                            $item.FullName.TrimEnd('\', '/') -eq $outputPath) { continue }
+                        $pending.Push($item)
+                        continue
+                    }
+                    if ($item.Name -eq $archiveName -or $item.FullName -eq $temporaryPath -or
+                        $item.Name -in @('.git', '.DS_Store', 'desktop.ini', 'CMakeCache.txt', 'compile_commands.json') -or
+                        ($item.Name -like '.env*' -and $item.Name -notin @('.env.example', '.env.sample', '.env.template')) -or
+                        $item.Name -match '\.(db|db3|sqlite|sqlite3)(-(wal|shm|journal))?$' -or
+                        $item.Name -match '\.(exe|dll|arx|grx|pdb|obj|o|lib|exp|ilk|dmp|pch|idb|tlog|user|suo|log|tmp|temp|bak|pyc|pyo|tsbuildinfo|swp|swo)$' -or
+                        $item.Name -like '*~') { continue }
+                    $entryName = "$projectName/$relativePath"
+                    [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile(
+                        $archive, $item.FullName, $entryName, [System.IO.Compression.CompressionLevel]::Optimal
+                    ) | Out-Null
+                    $count++
+                }
+            }
+        } finally {
+            $archive.Dispose()
+        }
+        Move-Item -LiteralPath $temporaryPath -Destination $archivePath -Force
+        Write-Host "[Zip] Archived $count source files: $archivePath" -ForegroundColor Green
+        Write-Host '[Zip] Existing source and build folders were left in place.'
+    } finally {
+        if (Test-Path -LiteralPath $temporaryPath) {
+            Remove-Item -LiteralPath $temporaryPath -Force
+        }
+    }
+}
+
+# Source packaging is independent of the native/UI build toolchains.
+if ($Zip) {
+    New-SourceArchive $scriptRoot $OutDir
+    return
+}
 
 # Find CMake executable
 $cmakeExe = $null
@@ -76,9 +187,6 @@ if (-not $cmakeExe) {
     Write-Error "CMake executable could not be found. Please ensure CMake or Visual Studio 2022 is installed."
     exit 1
 }
-
-$scriptRoot = $PSScriptRoot
-if (-not $scriptRoot) { $scriptRoot = Get-Location }
 
 if ($Clean) {
     Write-Host "[Clean] Removing build and $OutDir directories..." -ForegroundColor Yellow
@@ -122,21 +230,7 @@ if ($All) {
 } elseif ($PSCmdlet.ParameterSetName -eq "SpecificVersion" -and $Version) {
     $targets.Add([PSCustomObject]@{ Platform="AUTOCAD"; Version=$Version; Key=$Version })
 } else {
-    # Default: auto-detect installed SDKs among standard versions
-    $candidates = @(
-        [PSCustomObject]@{ Platform="AUTOCAD"; Version="2021"; Key="2021" },
-        [PSCustomObject]@{ Platform="AUTOCAD"; Version="2018"; Key="2018" },
-        [PSCustomObject]@{ Platform="GSTARCAD"; Version="2026"; Key="gstarcad_2026" }
-    )
-    foreach ($cand in $candidates) {
-        if (Test-SdkInstalled $cand.Platform $cand.Version) {
-            $targets.Add($cand)
-        }
-    }
-    if ($targets.Count -eq 0) {
-        # Fallback to AutoCAD 2021 if none detected
-        $targets.Add([PSCustomObject]@{ Platform="AUTOCAD"; Version="2021"; Key="2021" })
-    }
+    $targets.Add([PSCustomObject]@{ Platform="AUTOCAD"; Version="2021"; Key="2021" })
 }
 
 $distPath = Join-Path $scriptRoot $OutDir

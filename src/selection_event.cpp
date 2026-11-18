@@ -40,16 +40,6 @@ namespace
     std::vector<std::string> g_selectedHandles;
     std::atomic<uint64_t> g_selectionVersion{1};
 
-    void updateSelectionCache(const std::vector<std::string>& handles)
-    {
-        std::lock_guard<std::mutex> lock(g_selectionMutex);
-        if (g_selectedHandles != handles)
-        {
-            g_selectedHandles = handles;
-            g_selectionVersion.fetch_add(1);
-        }
-    }
-
     std::vector<std::string> collectImpliedSelectionHandles()
     {
         std::vector<std::string> handles;
@@ -91,35 +81,82 @@ namespace
         return handles;
     }
 
+    bool syncImpliedSelectionInternal()
+    {
+        std::vector<std::string> handles = collectImpliedSelectionHandles();
+        std::lock_guard<std::mutex> lock(g_selectionMutex);
+        if (g_selectedHandles != handles)
+        {
+            g_selectedHandles = handles;
+            g_selectionVersion.fetch_add(1);
+            try
+            {
+                js_engine::emitSelectionEvent(handles);
+            }
+            catch (...)
+            {
+            }
+            return true;
+        }
+        return false;
+    }
+
     class SelectionEventReactor : public AcEditorReactor
     {
     public:
         void pickfirstModified() override
+        {
+            handleEvent();
+        }
+
+        void commandEnded(const ACHAR* /*pCmdStr*/) override
+        {
+            handleEvent();
+        }
+
+        void commandCancelled(const ACHAR* /*pCmdStr*/) override
+        {
+            handleEvent();
+        }
+
+        void commandFailed(const ACHAR* /*pCmdStr*/) override
+        {
+            handleEvent();
+        }
+
+        void lispEnded() override
+        {
+            handleEvent();
+        }
+
+        void lispCancelled() override
+        {
+            handleEvent();
+        }
+
+        void layoutSwitched(const ACHAR* /*newLayoutName*/) override
+        {
+            handleEvent();
+        }
+
+        void endDwgOpen(const ACHAR* /*filename*/, AcDbDatabase* /*pDb*/) override
+        {
+            handleEvent();
+        }
+
+    private:
+        void handleEvent()
         {
             static bool s_inReactor = false;
             if (s_inReactor)
             {
                 return;
             }
-
-            // Never run while any command, script, or LISP is currently executing in AutoCAD!
-            resbuf rb;
-            if (acedGetVar(ACRX_T("CMDACTIVE"), &rb) == RTNORM)
-            {
-                if (rb.resval.rint != 0)
-                {
-                    return;
-                }
-            }
-
             s_inReactor = true;
 
             try
             {
-                std::vector<std::string> handles = collectImpliedSelectionHandles();
-                updateSelectionCache(handles);
-
-                js_engine::emitSelectionEvent(handles);
+                syncImpliedSelectionInternal();
             }
             catch (...)
             {
@@ -163,5 +200,14 @@ namespace selection_event
         std::lock_guard<std::mutex> lock(g_selectionMutex);
         return g_selectedHandles;
     }
-}
 
+    bool syncImpliedSelection()
+    {
+        return syncImpliedSelectionInternal();
+    }
+
+    void notifySelectionModified()
+    {
+        g_selectionVersion.fetch_add(1);
+    }
+}

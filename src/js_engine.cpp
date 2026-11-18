@@ -649,6 +649,16 @@ Runtime *g_runtime = nullptr;
 std::thread::id g_runtimeThreadId;
 std::mutex g_runtimeMutex;
 bool g_runtimePrepared = false;
+thread_local unsigned int g_runtimeEntryDepth = 0;
+
+class RuntimeEntryGuard {
+public:
+  RuntimeEntryGuard() { ++g_runtimeEntryDepth; }
+  ~RuntimeEntryGuard() { --g_runtimeEntryDepth; }
+
+  RuntimeEntryGuard(const RuntimeEntryGuard &) = delete;
+  RuntimeEntryGuard &operator=(const RuntimeEntryGuard &) = delete;
+};
 
 EvalResult jsonRuntimeError(const char *message) {
   return {false, std::string("{\"error\":") + jsonQuote(message) + "}"};
@@ -1013,6 +1023,7 @@ EvalResult Runtime::evalJsonInternal(const std::string &source) {
 
 EvalResult eval(const std::string &source) {
   std::lock_guard<std::mutex> lock(g_runtimeMutex);
+  RuntimeEntryGuard runtimeEntry;
   if (!ensureRuntimeForCurrentThreadLocked()) {
     return textRuntimeError("failed to create JavaScript runtime");
   }
@@ -1026,6 +1037,7 @@ EvalResult eval(const std::string &source) {
 
 EvalResult evalForRepl(const std::string &source) {
   std::lock_guard<std::mutex> lock(g_runtimeMutex);
+  RuntimeEntryGuard runtimeEntry;
   if (!ensureRuntimeForCurrentThreadLocked()) {
     return textRuntimeError("failed to create JavaScript runtime");
   }
@@ -1039,6 +1051,7 @@ EvalResult evalForRepl(const std::string &source) {
 
 EvalResult evalJson(const std::string &source) {
   std::lock_guard<std::mutex> lock(g_runtimeMutex);
+  RuntimeEntryGuard runtimeEntry;
   if (!ensureRuntimeForCurrentThreadLocked()) {
     return jsonRuntimeError("failed to create JavaScript runtime");
   }
@@ -1051,7 +1064,21 @@ EvalResult evalJson(const std::string &source) {
 }
 
 EvalResult emitSelectionEvent(const std::vector<std::string> &entityHandles) {
-  std::lock_guard<std::mutex> lock(g_runtimeMutex);
+  // PICKFIRST can reenter from JS; the selection cache is already updated.
+  // Check before try_lock, which cannot be called while this thread owns it.
+  if (g_runtimeEntryDepth != 0) {
+    return {true, std::string()};
+  }
+  std::unique_lock<std::mutex> lock(g_runtimeMutex, std::try_to_lock);
+  if (!lock.owns_lock()) {
+    return {true, std::string()};
+  }
+  RuntimeEntryGuard runtimeEntry;
+  // No selection handler can be registered before the first JS evaluation.
+  // Keep passive startup selection notifications from constructing a runtime.
+  if (g_runtime == nullptr) {
+    return {true, std::string()};
+  }
   if (!ensureRuntimeForCurrentThreadLocked()) {
     return textRuntimeError("failed to create JavaScript runtime");
   }

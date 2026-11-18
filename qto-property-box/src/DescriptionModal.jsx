@@ -9,13 +9,15 @@ export default function DescriptionModal({
   descriptions = {},
   onSaveDescription,
   onDeleteDescription,
-  cadConnected = false
+  projectPath
 }) {
   const [code, setCode] = useState(initialCode);
   const [itemsStr, setItemsStr] = useState('');
   const [shortDesc, setShortDesc] = useState('');
   const [fullDesc, setFullDesc] = useState('');
   const [statusMsg, setStatusMsg] = useState('');
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     if (isOpen) {
@@ -27,6 +29,7 @@ export default function DescriptionModal({
       setShortDesc(existing.short || '');
       setFullDesc(existing.full || '');
       setStatusMsg('');
+      setError('');
     }
   }, [isOpen, initialCode, descriptions]);
 
@@ -38,9 +41,14 @@ export default function DescriptionModal({
     .filter(Boolean);
 
   const handleSave = async () => {
+    if (busy) return;
     const trimmedCode = code.trim();
     if (!trimmedCode) {
-      alert('Kode pekerjaan tidak boleh kosong.');
+      setError('The item code cannot be empty.');
+      return;
+    }
+    if (!projectPath) {
+      setError('Open a project before saving descriptions.');
       return;
     }
 
@@ -50,46 +58,35 @@ export default function DescriptionModal({
       full: fullDesc.trim()
     };
 
+    setBusy(true);
+    setError('');
+    setStatusMsg('Saving description…');
     try {
-      if (cadConnected) {
-        await invoke('cad_save_description', {
-          code: trimmedCode,
-          items: payload.items,
-          short: payload.short,
-          full: payload.full
-        });
-      }
-    } catch (err) {
-      console.warn('CAD SQLite save error:', err);
-    }
-
-    if (onSaveDescription) {
-      onSaveDescription(trimmedCode, payload);
-    }
-
-    setStatusMsg('Deskripsi berhasil disimpan ke SQLite!');
-    setTimeout(() => {
+      await invoke('save_project_description', { projectPath, code: trimmedCode, description: payload });
+      onSaveDescription?.(trimmedCode, payload);
       onClose();
-    }, 400);
+    } catch (err) {
+      setError(`Could not save description: ${String(err)}`);
+    } finally { setBusy(false); setStatusMsg(''); }
   };
 
   const handleDelete = async () => {
+    if (busy) return;
     const trimmedCode = code.trim();
     if (!trimmedCode || !descriptions[trimmedCode]) return;
-    if (!window.confirm(`Hapus deskripsi untuk kode "${trimmedCode}"?`)) return;
+    if (!window.confirm(`Delete the description for code "${trimmedCode}"?`)) return;
 
+    if (!projectPath) { setError('Open a project before deleting descriptions.'); return; }
+    setBusy(true);
+    setError('');
+    setStatusMsg('Deleting description…');
     try {
-      if (cadConnected) {
-        await invoke('cad_delete_description', { code: trimmedCode });
-      }
+      await invoke('delete_project_description', { projectPath, code: trimmedCode });
+      onDeleteDescription?.(trimmedCode);
+      onClose();
     } catch (err) {
-      console.warn('CAD SQLite delete error:', err);
-    }
-
-    if (onDeleteDescription) {
-      onDeleteDescription(trimmedCode);
-    }
-    onClose();
+      setError(`Could not delete description: ${String(err)}`);
+    } finally { setBusy(false); setStatusMsg(''); }
   };
 
   return (
@@ -100,11 +97,12 @@ export default function DescriptionModal({
           <div className="flex items-center gap-2">
             <Database className="w-4 h-4 text-emerald-400" />
             <h3 className="text-sm font-bold text-white tracking-wide">
-              Kelola Deskripsi Kode (SQLite)
+              Manage Code Description
             </h3>
           </div>
           <button
             onClick={onClose}
+            disabled={busy}
             className="p-1 rounded text-slate-400 hover:text-white transition-colors"
           >
             <X className="w-4 h-4" />
@@ -114,19 +112,20 @@ export default function DescriptionModal({
         {/* Content */}
         <div className="p-4 space-y-3.5 overflow-y-auto flex-1">
           <div className="bg-emerald-950/20 border border-emerald-500/30 rounded p-2.5 text-[11px] text-emerald-300 leading-relaxed">
-            <strong>Catatan:</strong> Deskripsi ini disimpan ke key-value SQLite table (<code>deskripsi</code>) dan <u>tidak</u> dimasukkan ke entity CAD untuk menjaga performa gambar tetap ringan.
+            Descriptions are saved with this project and available across its drawings.
           </div>
 
           {/* Code Input */}
           <div>
             <label className="block text-xs font-medium text-slate-300 mb-1">
-              Kode Pekerjaan (Key):
+              Item Code (Key):
             </label>
             <input
               type="text"
+              disabled={busy}
               value={code}
               onChange={(e) => setCode(e.target.value)}
-              placeholder="Contoh: FloorFin/CT1 atau CPT1"
+              placeholder="e.g. FloorFin/CT1 or CPT1"
               className="w-full bg-[#0d1117] border border-slate-700 px-3 py-1.5 rounded text-xs font-mono text-amber-300 focus:outline-none focus:border-emerald-500"
             />
           </div>
@@ -134,13 +133,14 @@ export default function DescriptionModal({
           {/* Items / Hierarchy Breadcrumb */}
           <div>
             <label className="block text-xs font-medium text-slate-300 mb-1">
-              Hirarki Item Pekerjaan (pisahkan dengan koma):
+              Item Hierarchy (comma-separated):
             </label>
             <input
               type="text"
+              disabled={busy}
               value={itemsStr}
               onChange={(e) => setItemsStr(e.target.value)}
-              placeholder="Contoh: Pek. Arsitektur, Pekerjaan Lantai, Keramik"
+              placeholder="e.g. Architecture, Flooring, Ceramic"
               className="w-full bg-[#0d1117] border border-slate-700 px-3 py-1.5 rounded text-xs text-slate-200 focus:outline-none focus:border-emerald-500"
             />
             {parsedItems.length > 0 && (
@@ -161,13 +161,14 @@ export default function DescriptionModal({
           {/* Short Description */}
           <div>
             <label className="block text-xs font-medium text-slate-300 mb-1">
-              Deskripsi Singkat (Short):
+              Short Description:
             </label>
             <input
               type="text"
+              disabled={busy}
               value={shortDesc}
               onChange={(e) => setShortDesc(e.target.value)}
-              placeholder="Contoh: Keramik ex. Roman uk.60x60"
+              placeholder="e.g. Roman ceramic tile, size 60x60"
               className="w-full bg-[#0d1117] border border-slate-700 px-3 py-1.5 rounded text-xs text-slate-100 focus:outline-none focus:border-emerald-500"
             />
           </div>
@@ -175,12 +176,13 @@ export default function DescriptionModal({
           {/* Full Description */}
           <div>
             <label className="block text-xs font-medium text-slate-300 mb-1">
-              Deskripsi Lengkap / Spesifikasi (Full):
+              Full Description / Specification:
             </label>
             <textarea
+              disabled={busy}
               value={fullDesc}
               onChange={(e) => setFullDesc(e.target.value)}
-              placeholder="Spesifikasi teknis lengkap, merek, tipe, metode pemasangan..."
+              placeholder="Technical specifications, brand, type, installation method..."
               rows={4}
               className="w-full bg-[#0d1117] border border-slate-700 p-2.5 rounded text-xs text-slate-200 focus:outline-none focus:border-emerald-500 resize-none font-sans leading-relaxed"
             />
@@ -189,6 +191,7 @@ export default function DescriptionModal({
           {statusMsg && (
             <p className="text-xs text-emerald-400 font-medium animate-pulse">{statusMsg}</p>
           )}
+          {error && <p role="alert" className="text-xs text-rose-300 font-medium">{error}</p>}
         </div>
 
         {/* Footer */}
@@ -196,10 +199,11 @@ export default function DescriptionModal({
           {descriptions[code.trim()] ? (
             <button
               onClick={handleDelete}
+              disabled={busy}
               className="flex items-center gap-1 px-3 py-1.5 rounded bg-rose-950/40 hover:bg-rose-900/60 text-rose-300 border border-rose-800/40 text-xs transition-colors"
             >
               <Trash2 className="w-3.5 h-3.5" />
-              <span>Hapus</span>
+              <span>Delete</span>
             </button>
           ) : (
             <div />
@@ -208,16 +212,18 @@ export default function DescriptionModal({
           <div className="flex items-center gap-2">
             <button
               onClick={onClose}
+              disabled={busy}
               className="px-3 py-1.5 rounded bg-[#1c2333] hover:bg-[#252f44] text-xs text-slate-300 transition-colors"
             >
-              Batal
+              Cancel
             </button>
             <button
               onClick={handleSave}
+              disabled={busy}
               className="flex items-center gap-1.5 px-4 py-1.5 rounded bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs shadow transition-colors"
             >
               <Check className="w-3.5 h-3.5" />
-              <span>Simpan Deskripsi</span>
+              <span>Save Description</span>
             </button>
           </div>
         </div>
@@ -225,4 +231,3 @@ export default function DescriptionModal({
     </div>
   );
 }
-
