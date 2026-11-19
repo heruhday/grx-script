@@ -202,6 +202,20 @@ function startDesktop() {
       else btn.textContent = label;
       btn.disabled = count === 0;
     });
+
+    ensureApplyButton();
+  }
+
+  function ensureApplyButton() {
+    const addRowBtn = byId('btn-add-row');
+    if (!addRowBtn || byId('btn-apply-xdata')) return;
+    const btn = document.createElement('button');
+    btn.id = 'btn-apply-xdata';
+    btn.type = 'button';
+    btn.title = 'Apply properties and XData to CAD (F5)';
+    btn.className = 'inline-flex h-8 items-center gap-1.5 rounded-full bg-sky-600 hover:bg-sky-500 px-3 text-[11px] font-semibold text-white shadow-sm border border-white/25 backdrop-blur-md hover:brightness-110 active:scale-95 transition';
+    btn.innerHTML = '<span>☁ Apply</span><span class="rounded bg-sky-800/80 px-1 py-0.5 text-[9px] font-mono">F5</span>';
+    addRowBtn.after(btn);
   }
 
   function updateCadOfflineUI() {
@@ -216,12 +230,20 @@ function startDesktop() {
   }
 
   let consecutiveErrors = 0;
+  let activeItemTracker = null;
   async function pollSelection() {
     if (polling) return;
     polling = true;
     try {
-      const result = await invoke('cad_poll_selection', { lastVersion: selection.version, port: 8123 });
+      const queryVersion = (selection.entities && selection.entities.length > 0) ? selection.version : 0;
+      const result = await invoke('cad_poll_selection', { lastVersion: queryVersion, port: 8123 });
       consecutiveErrors = 0;
+
+      const activeInfo = ui.getActiveItem ? ui.getActiveItem() : null;
+      const currentItemId = activeInfo?.item?.id || null;
+      const itemChanged = Boolean(currentItemId && currentItemId !== activeItemTracker);
+      if (currentItemId) activeItemTracker = currentItemId;
+
       if (result.changed !== false) {
         selection = { ...result, entities: result.entities || [] };
         if (ui.syncCadSelection) {
@@ -236,7 +258,13 @@ function startDesktop() {
         }
         updateCadSelectionUI(result, []);
         lastRenderedVersion = 0;
+      } else if (itemChanged && selection.entities && selection.entities.length > 0) {
+        if (ui.syncCadSelection) {
+          ui.syncCadSelection(selection.entities);
+        }
+        updateCadSelectionUI(selection, selection.entities);
       }
+      ensureApplyButton();
     } catch {
       consecutiveErrors++;
       if (consecutiveErrors >= 3 && (selection.dwg || selection.entities.length)) {
@@ -454,14 +482,34 @@ function startDesktop() {
     });
   });
 
-  // Pick CAD button in row panels & event bar
-  document.addEventListener('click', (e) => {
+  // Pick CAD button, Apply button, and item change sync
+  document.addEventListener('click', async (e) => {
+    const applyBtn = e.target.closest('#btn-apply-xdata');
+    if (applyBtn) {
+      e.stopPropagation();
+      e.preventDefault();
+      await applyAllToCad();
+      return;
+    }
+
     const btn = e.target.closest('.pick-sim-btn, #btn-send-fake-cad');
     if (btn) {
       e.stopPropagation();
       e.preventDefault();
       pickSelection();
+      return;
     }
+
+    setTimeout(() => {
+      const activeInfo = ui.getActiveItem ? ui.getActiveItem() : null;
+      if (activeInfo?.item && selection.entities && selection.entities.length > 0) {
+        if (ui.syncCadSelection) {
+          ui.syncCadSelection(selection.entities);
+        }
+        updateCadSelectionUI(selection, selection.entities);
+      }
+      ensureApplyButton();
+    }, 30);
   }, true);
 
   // Location field direct edits applied to CAD
@@ -510,8 +558,20 @@ function startDesktop() {
 
   // Apply all current UI properties (Item QTO + Location + General) to selected CAD objects
   async function applyAllToCad() {
-    await pollSelection();
-    if (!selection.entities.length) {
+    if (!selection.entities || !selection.entities.length) {
+      await pollSelection();
+    }
+    if (!selection.entities || !selection.entities.length) {
+      try {
+        const fresh = await invoke('cad_poll_selection', { lastVersion: 0, port: 8123 });
+        if (fresh && fresh.entities && fresh.entities.length > 0) {
+          selection = { ...fresh, entities: fresh.entities };
+          updateCadSelectionUI(fresh, selection.entities);
+        }
+      } catch {}
+    }
+
+    if (!selection.entities || !selection.entities.length) {
       notify('No CAD objects are selected. Select objects in CAD first.');
       return;
     }
@@ -605,17 +665,22 @@ function startDesktop() {
       notify(`Applied XData${itemCodeMsg} to ${patches.length} CAD object(s) · Qty: ${Number(totalQty).toFixed(2)} ${item?.unit || 'm'}`);
       const genStatus = byId('general-status');
       if (genStatus) genStatus.textContent = `Applied to ${patches.length} object(s)`;
-      await pollSelection();
+      const refreshed = await invoke('cad_poll_selection', { lastVersion: 0, port: 8123 });
+      if (refreshed && refreshed.entities) {
+        selection = { ...refreshed, entities: refreshed.entities };
+        updateCadSelectionUI(refreshed, selection.entities);
+      }
       if (project) scheduleSave();
     } catch (e) {
       notify(`Apply error: ${e}`);
     }
   }
 
-  // F5 shortcut and Enter key on inputs to apply properties to CAD
+  // F5 shortcut and Enter key on inputs to apply properties to CAD (capture phase)
   window.addEventListener('keydown', async (e) => {
     if (e.key === 'F5' && !e.ctrlKey && !e.altKey && !e.metaKey) {
       e.preventDefault();
+      e.stopPropagation();
       await applyAllToCad();
     } else if (e.key === 'Enter') {
       const codeInput = e.target.closest('#input-item-code');
@@ -623,11 +688,11 @@ function startDesktop() {
       const nameInput = e.target.closest('#input-item-name');
       const locInput = e.target.closest('#location-panel input, #location-panel textarea');
       const genInput = e.target.closest('#general-panel input, #general-panel select');
-      const rowInput = e.target.closest('.measurement-row-panel input');
+      const rowInput = e.target.closest('.measurement-row-panel input, .row-val-input');
 
       if (codeInput || wbsInput || nameInput || locInput || genInput || rowInput) {
         e.preventDefault();
-        e.target.blur();
+        e.stopPropagation();
 
         const activeInfo = ui.getActiveItem ? ui.getActiveItem() : null;
         if (activeInfo?.item) {
@@ -636,28 +701,18 @@ function startDesktop() {
           if (nameInput) activeInfo.item.name = nameInput.value.trim() || activeInfo.item.name;
         }
 
+        e.target.blur();
         await applyAllToCad();
         if (ui.render) ui.render();
       }
     }
-  });
+  }, true);
 
   window.qtoSaveProjectUI = () => save().then(() => notify('Project saved.'));
   for (const name of ['click', 'input', 'change', 'qto-wbs-change', 'qto-panel-visibility']) document.addEventListener(name, scheduleSave);
   document.addEventListener('toggle', scheduleSave, true);
   window.addEventListener('scroll', scheduleSave, { passive: true });
   document.addEventListener('visibilitychange', () => { if (document.hidden) save().catch(notify); });
-
-  document.addEventListener('click', (e) => {
-    if (e.target.closest('.category-summary-row, .item-list-row, .category-pill, #btn-add-row, .pick-mode-pill')) {
-      setTimeout(() => {
-        if (selection.entities.length > 0 && ui.syncCadSelection) {
-          ui.syncCadSelection(selection.entities);
-        }
-        updateCadSelectionUI(selection, selection.entities);
-      }, 50);
-    }
-  });
 
   setInterval(pollSelection, 400);
   pollSelection();

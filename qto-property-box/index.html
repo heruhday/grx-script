@@ -1735,9 +1735,14 @@ body:not(.theme-dark) #sort-level-dialog .sort-card:not(.selected) { background:
       }
 
       function parseUSNum(v) {
-        const num = parseFloat(String(v ?? '').replace(/[\s,]+/g, '').trim());
+        if (v == null) return 0;
+        let str = String(v).trim();
+        if (str.includes(',') && !str.includes('.')) str = str.replace(',', '.');
+        else str = str.replace(/[\s,]+/g, '');
+        const num = parseFloat(str);
         return Number.isFinite(num) ? num : 0;
       }
+      window.parseUSNum = parseUSNum;
 
       function fmtNum(n) {
         const val = Number(n);
@@ -4125,9 +4130,17 @@ body:not(.theme-dark) #sort-level-dialog .sort-card:not(.selected) { background:
           const totalA = entities ? entities.reduce((sum, ent) => sum + (Number(ent.a ?? ent.area) || 0), 0) : 0;
           const totalV = entities ? entities.reduce((sum, ent) => sum + (Number(ent.v ?? ent.vol ?? ent.volume) || 0), 0) : 0;
 
+          if (!item.rows) item.rows = [];
           let pickRow = item.rows.find(r => r.mode === 'pick');
           if(!pickRow && item.rows.length === 1 && (pickRow = item.rows[0])) {
             pickRow.mode = 'pick';
+          }
+          if(!pickRow && item.rows.length === 0) {
+            pickRow = { id: uid('row'), value: 0, mode: 'pick', source: cat.sourceDefault || 'e.l', note: '' };
+            item.rows.push(pickRow);
+          }
+          if(!pickRow && item.rows.length > 0) {
+            pickRow = item.rows[0];
           }
           if(!pickRow) return;
 

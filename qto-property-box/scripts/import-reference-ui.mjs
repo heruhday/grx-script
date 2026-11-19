@@ -16,6 +16,22 @@ html = html.replaceAll(
   "body.querySelector('.pick-sim-btn').addEventListener('click', () => { if(window.qtoDesktop){window.qtoDesktop.pickSelection();return;}"
 );
 
+replace(
+  `      function parseUSNum(v) {
+        const num = parseFloat(String(v ?? '').replace(/[\\s,]+/g, '').trim());
+        return Number.isFinite(num) ? num : 0;
+      }`,
+  `      function parseUSNum(v) {
+        if (v == null) return 0;
+        let str = String(v).trim();
+        if (str.includes(',') && !str.includes('.')) str = str.replace(',', '.');
+        else str = str.replace(/[\\s,]+/g, '');
+        const num = parseFloat(str);
+        return Number.isFinite(num) ? num : 0;
+      }
+      window.parseUSNum = parseUSNum;`
+);
+
 const injectedUIState = `      window.qtoUIState = {
         exportData: () => JSON.parse(JSON.stringify({categories:state.categories,customFunctions,evalScripts})),
         importData: data => {
@@ -38,9 +54,17 @@ const injectedUIState = `      window.qtoUIState = {
           const totalA = entities ? entities.reduce((sum, ent) => sum + (Number(ent.a ?? ent.area) || 0), 0) : 0;
           const totalV = entities ? entities.reduce((sum, ent) => sum + (Number(ent.v ?? ent.vol ?? ent.volume) || 0), 0) : 0;
 
+          if (!item.rows) item.rows = [];
           let pickRow = item.rows.find(r => r.mode === 'pick');
           if(!pickRow && item.rows.length === 1 && (pickRow = item.rows[0])) {
             pickRow.mode = 'pick';
+          }
+          if(!pickRow && item.rows.length === 0) {
+            pickRow = { id: uid('row'), value: 0, mode: 'pick', source: cat.sourceDefault || 'e.l', note: '' };
+            item.rows.push(pickRow);
+          }
+          if(!pickRow && item.rows.length > 0) {
+            pickRow = item.rows[0];
           }
           if(!pickRow) return;
 
