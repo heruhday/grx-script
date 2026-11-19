@@ -385,6 +385,9 @@ if ($tauriExe) {
         Safe-CopyTauri (Join-Path $distPath "$($tgt.Key)\qto-property-box.exe")
         Safe-CopyTauri (Join-Path $bundleContents "$($tgt.Key)\qto-property-box.exe")
     }
+    if (Test-Path "D:\lisp\arx") {
+        Safe-CopyTauri "D:\lisp\arx\qto-property-box.exe"
+    }
 }
 
 Write-Host "`n==========================================================" -ForegroundColor Cyan

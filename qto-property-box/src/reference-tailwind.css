@@ -91,6 +91,10 @@ main {
 #category-filter-bar button.glass-pill-active,
 #category-filter-bar button.glass-pill-btn,
 #category-filter-bar button.glass-sub,
+#settings-panel #category-filter-bar button,
+#settings-panel #category-filter-bar button.glass-pill-active,
+#settings-panel #category-filter-bar button.glass-pill-btn,
+#settings-panel #category-filter-bar button.glass-sub,
 .report-category-icons button,
 .report-category-icons button.glass-pill-active,
 .report-category-icons button.glass-pill-btn,
@@ -114,6 +118,9 @@ main {
 #category-filter-bar button:hover,
 #category-filter-bar button:focus,
 #category-filter-bar button:active,
+#settings-panel #category-filter-bar button:hover,
+#settings-panel #category-filter-bar button:focus,
+#settings-panel #category-filter-bar button:active,
 .report-category-icons button:hover,
 .report-category-icons button:focus,
 .report-category-icons button:active {
@@ -134,6 +141,11 @@ main {
 #category-filter-bar button.opacity-35,
 #category-filter-bar button.grayscale,
 #category-filter-bar button:not(.glass-pill-active):not([aria-pressed="true"]):not([title*="(On)"]),
+#settings-panel #category-filter-bar button[aria-pressed="false"],
+#settings-panel #category-filter-bar button[title*="(Off)"],
+#settings-panel #category-filter-bar button.opacity-35,
+#settings-panel #category-filter-bar button.grayscale,
+#settings-panel #category-filter-bar button:not(.glass-pill-active):not([aria-pressed="true"]):not([title*="(On)"]),
 .report-category-icons button[aria-pressed="false"],
 .report-category-icons button[title*="(Off)"],
 .report-category-icons button:not(.glass-pill-active):not([aria-pressed="true"]):not([title*="(On)"]) {
@@ -147,6 +159,11 @@ main {
 #category-filter-bar button.opacity-35 svg,
 #category-filter-bar button.grayscale svg,
 #category-filter-bar button:not(.glass-pill-active):not([aria-pressed="true"]):not([title*="(On)"]) svg,
+#settings-panel #category-filter-bar button[aria-pressed="false"] svg,
+#settings-panel #category-filter-bar button[title*="(Off)"] svg,
+#settings-panel #category-filter-bar button.opacity-35 svg,
+#settings-panel #category-filter-bar button.grayscale svg,
+#settings-panel #category-filter-bar button:not(.glass-pill-active):not([aria-pressed="true"]):not([title*="(On)"]) svg,
 .report-category-icons button[aria-pressed="false"] svg,
 .report-category-icons button[title*="(Off)"] svg,
 .report-category-icons button:not(.glass-pill-active):not([aria-pressed="true"]):not([title*="(On)"]) svg {
@@ -158,6 +175,9 @@ main {
 #category-filter-bar button[aria-pressed="false"]:hover,
 #category-filter-bar button[title*="(Off)"]:hover,
 #category-filter-bar button:not(.glass-pill-active):not([aria-pressed="true"]):not([title*="(On)"]):hover,
+#settings-panel #category-filter-bar button[aria-pressed="false"]:hover,
+#settings-panel #category-filter-bar button[title*="(Off)"]:hover,
+#settings-panel #category-filter-bar button:not(.glass-pill-active):not([aria-pressed="true"]):not([title*="(On)"]):hover,
 .report-category-icons button[aria-pressed="false"]:hover,
 .report-category-icons button[title*="(Off)"]:hover,
 .report-category-icons button:not(.glass-pill-active):not([aria-pressed="true"]):not([title*="(On)"]):hover {
@@ -169,6 +189,9 @@ main {
 #category-filter-bar button[aria-pressed="true"],
 #category-filter-bar button[title*="(On)"],
 #category-filter-bar button.glass-pill-active,
+#settings-panel #category-filter-bar button[aria-pressed="true"],
+#settings-panel #category-filter-bar button[title*="(On)"],
+#settings-panel #category-filter-bar button.glass-pill-active,
 .report-category-icons button[aria-pressed="true"],
 .report-category-icons button[title*="(On)"],
 .report-category-icons button.glass-pill-active {
@@ -179,6 +202,9 @@ main {
 #category-filter-bar button[aria-pressed="true"]:hover,
 #category-filter-bar button[title*="(On)"]:hover,
 #category-filter-bar button.glass-pill-active:hover,
+#settings-panel #category-filter-bar button[aria-pressed="true"]:hover,
+#settings-panel #category-filter-bar button[title*="(On)"]:hover,
+#settings-panel #category-filter-bar button.glass-pill-active:hover,
 .report-category-icons button[aria-pressed="true"]:hover,
 .report-category-icons button[title*="(On)"]:hover,
 .report-category-icons button.glass-pill-active:hover {
@@ -187,31 +213,281 @@ main {
 
 /* Active specific icon colors */
 #category-filter-bar > button:first-child[aria-pressed="true"],
-#category-filter-bar > button:first-child.glass-pill-active {
+#category-filter-bar > button:first-child.glass-pill-active,
+#settings-panel #category-filter-bar > button:first-child[aria-pressed="true"],
+#settings-panel #category-filter-bar > button:first-child.glass-pill-active {
   color: #f8fafc !important;
 }
-#category-filter-bar > #btn-category-drawings[aria-pressed="true"],
-#category-filter-bar > #btn-category-drawings.glass-pill-active {
+#category-filter-bar #btn-category-drawings,
+#settings-panel #category-filter-bar #btn-category-drawings {
   color: #f8fafc !important;
 }
-#category-filter-bar > #btn-category-general[aria-pressed="true"],
-#category-filter-bar > #btn-category-general.glass-pill-active {
+#category-filter-bar #btn-category-general[aria-pressed="true"],
+#category-filter-bar #btn-category-general.glass-pill-active,
+#settings-panel #category-filter-bar #btn-category-general[aria-pressed="true"],
+#settings-panel #category-filter-bar #btn-category-general.glass-pill-active {
   color: #a78bfa !important;
+  background: transparent !important;
+  background-image: none !important;
 }
-#category-filter-bar > #btn-category-wbs[aria-pressed="true"],
-#category-filter-bar > #btn-category-wbs.glass-pill-active {
+#category-filter-bar #btn-category-general[aria-pressed="true"] svg,
+#category-filter-bar #btn-category-general.glass-pill-active svg,
+#settings-panel #category-filter-bar #btn-category-general[aria-pressed="true"] svg,
+#settings-panel #category-filter-bar #btn-category-general.glass-pill-active svg {
+  color: #a78bfa !important;
+  stroke: currentColor !important;
+}
+#category-filter-bar #btn-category-wbs[aria-pressed="true"],
+#category-filter-bar #btn-category-wbs.glass-pill-active,
+#settings-panel #category-filter-bar #btn-category-wbs[aria-pressed="true"],
+#settings-panel #category-filter-bar #btn-category-wbs.glass-pill-active {
   color: #818cf8 !important;
 }
-#category-filter-bar > #btn-category-location[aria-pressed="true"],
-#category-filter-bar > #btn-category-location.glass-pill-active {
+#category-filter-bar #btn-category-location[aria-pressed="true"],
+#category-filter-bar #btn-category-location.glass-pill-active,
+#settings-panel #category-filter-bar #btn-category-location[aria-pressed="true"],
+#settings-panel #category-filter-bar #btn-category-location.glass-pill-active {
   color: #38bdf8 !important;
 }
-#category-filter-bar > #btn-category-preview[aria-pressed="true"],
-#category-filter-bar > #btn-category-preview.glass-pill-active {
+#category-filter-bar #btn-category-preview[aria-pressed="true"],
+#category-filter-bar #btn-category-preview.glass-pill-active,
+#settings-panel #category-filter-bar #btn-category-preview[aria-pressed="true"],
+#settings-panel #category-filter-bar #btn-category-preview.glass-pill-active {
   color: #a78bfa !important;
+  background: transparent !important;
+  background-image: none !important;
 }
-#category-filter-bar > #btn-category-selected-report[aria-pressed="true"],
-#category-filter-bar > #btn-category-selected-report.glass-pill-active {
+#category-filter-bar #btn-category-preview[aria-pressed="true"] svg,
+#category-filter-bar #btn-category-preview.glass-pill-active svg,
+#settings-panel #category-filter-bar #btn-category-preview[aria-pressed="true"] svg,
+#settings-panel #category-filter-bar #btn-category-preview.glass-pill-active svg {
+  color: #a78bfa !important;
+  stroke: currentColor !important;
+}
+#category-filter-bar #btn-category-selected-report[aria-pressed="true"],
+#category-filter-bar #btn-category-selected-report.glass-pill-active,
+#settings-panel #category-filter-bar #btn-category-selected-report[aria-pressed="true"],
+#settings-panel #category-filter-bar #btn-category-selected-report.glass-pill-active {
   color: #f8fafc !important;
 }
+
+/* Category item buttons active colors */
+#category-filter-bar button[title^="Length ("]:not([title*="(Off)"]):not([aria-pressed="false"]),
+.report-category-icons button[title^="Length ("]:not([title*="(Off)"]):not([aria-pressed="false"]) {
+  color: #38bdf8 !important;
+}
+#category-filter-bar button[title^="Area ("]:not([title*="(Off)"]):not([aria-pressed="false"]),
+.report-category-icons button[title^="Area ("]:not([title*="(Off)"]):not([aria-pressed="false"]) {
+  color: #34d399 !important;
+}
+#category-filter-bar button[title^="Object Count ("]:not([title*="(Off)"]):not([aria-pressed="false"]),
+#category-filter-bar button[title^="Count ("]:not([title*="(Off)"]):not([aria-pressed="false"]),
+.report-category-icons button[title^="Object Count ("]:not([title*="(Off)"]):not([aria-pressed="false"]),
+.report-category-icons button[title^="Count ("]:not([title*="(Off)"]):not([aria-pressed="false"]) {
+  color: #fbbf24 !important;
+}
+#category-filter-bar button[title^="Wall Area ("]:not([title*="(Off)"]):not([aria-pressed="false"]),
+#category-filter-bar button[title^="Wall ("]:not([title*="(Off)"]):not([aria-pressed="false"]),
+.report-category-icons button[title^="Wall Area ("]:not([title*="(Off)"]):not([aria-pressed="false"]),
+.report-category-icons button[title^="Wall ("]:not([title*="(Off)"]):not([aria-pressed="false"]) {
+  color: #fb7185 !important;
+}
+#category-filter-bar button[title^="Structural / Material Weight ("]:not([title*="(Off)"]):not([aria-pressed="false"]),
+#category-filter-bar button[title^="Weight ("]:not([title*="(Off)"]):not([aria-pressed="false"]),
+.report-category-icons button[title^="Structural / Material Weight ("]:not([title*="(Off)"]):not([aria-pressed="false"]),
+.report-category-icons button[title^="Weight ("]:not([title*="(Off)"]):not([aria-pressed="false"]) {
+  color: #22d3ee !important;
+}
+#category-filter-bar button[title^="Solid ("]:not([title*="(Off)"]):not([aria-pressed="false"]),
+#category-filter-bar button[title^="Volume ("]:not([title*="(Off)"]):not([aria-pressed="false"]),
+.report-category-icons button[title^="Solid ("]:not([title*="(Off)"]):not([aria-pressed="false"]),
+.report-category-icons button[title^="Volume ("]:not([title*="(Off)"]):not([aria-pressed="false"]) {
+  color: #a78bfa !important;
+}
+
+/* ==========================================================================
+   Measurement Row Mode Buttons: Pure Icon Color / Grey Only, No Background
+   ========================================================================== */
+
+/* Group container around the 5 mode buttons */
+.measurement-row-panel div.rounded-full,
+.measurement-row-panel div.rounded-full.glass-sub,
+#measurement-rows .measurement-row-panel div.rounded-full {
+  background: transparent !important;
+  background-color: transparent !important;
+  background-image: none !important;
+  border: none !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+  -webkit-box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+/* All mode buttons inside the measurement row */
+.measurement-row-panel div.rounded-full > button,
+#measurement-rows .measurement-row-panel div.rounded-full > button {
+  background: transparent !important;
+  background-image: none !important;
+  background-color: transparent !important;
+  border: none !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+  -webkit-box-shadow: none !important;
+  outline: none !important;
+  --tw-ring-shadow: 0 0 #0000 !important;
+  --tw-ring-color: transparent !important;
+  --tw-ring-offset-shadow: 0 0 #0000 !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  transition: color 0.15s ease, opacity 0.15s ease, transform 0.1s ease !important;
+}
+
+/* Inactive row mode buttons: Grey only */
+.measurement-row-panel div.rounded-full > button:not([class*="bg-gradient"]):not([aria-pressed="true"]),
+#measurement-rows .measurement-row-panel div.rounded-full > button:not([class*="bg-gradient"]):not([aria-pressed="true"]) {
+  color: #64748b !important;
+  opacity: 0.45 !important;
+  filter: grayscale(100%) !important;
+}
+
+.measurement-row-panel div.rounded-full > button:not([class*="bg-gradient"]):not([aria-pressed="true"]) svg,
+#measurement-rows .measurement-row-panel div.rounded-full > button:not([class*="bg-gradient"]):not([aria-pressed="true"]) svg {
+  color: #64748b !important;
+  stroke: currentColor !important;
+}
+
+.measurement-row-panel div.rounded-full > button:not([class*="bg-gradient"]):not([aria-pressed="true"]):hover,
+#measurement-rows .measurement-row-panel div.rounded-full > button:not([class*="bg-gradient"]):not([aria-pressed="true"]):hover {
+  opacity: 0.8 !important;
+  filter: grayscale(40%) !important;
+}
+
+/* Active row mode buttons: Pure icon color (no background, no shadow) */
+.measurement-row-panel div.rounded-full > button[class*="bg-gradient"],
+.measurement-row-panel div.rounded-full > button[aria-pressed="true"],
+#measurement-rows .measurement-row-panel div.rounded-full > button[class*="bg-gradient"],
+#measurement-rows .measurement-row-panel div.rounded-full > button[aria-pressed="true"] {
+  opacity: 1 !important;
+  filter: none !important;
+  background: transparent !important;
+  background-image: none !important;
+  background-color: transparent !important;
+  box-shadow: none !important;
+  -webkit-box-shadow: none !important;
+}
+
+.measurement-row-panel div.rounded-full > button[class*="bg-gradient"]:hover,
+.measurement-row-panel div.rounded-full > button[aria-pressed="true"]:hover,
+#measurement-rows .measurement-row-panel div.rounded-full > button[class*="bg-gradient"]:hover,
+#measurement-rows .measurement-row-panel div.rounded-full > button[aria-pressed="true"]:hover {
+  filter: brightness(1.25) !important;
+}
+
+/* 1. None mode (rose) */
+.measurement-row-panel div.rounded-full > button[class*="from-rose"],
+.measurement-row-panel div.rounded-full > button[title*="None"][class*="bg-gradient"],
+.measurement-row-panel div.rounded-full > button[title*="None"][aria-pressed="true"],
+#measurement-rows .measurement-row-panel div.rounded-full > button[class*="from-rose"],
+#measurement-rows .measurement-row-panel div.rounded-full > button[title*="None"][class*="bg-gradient"],
+#measurement-rows .measurement-row-panel div.rounded-full > button[title*="None"][aria-pressed="true"] {
+  color: #fb7185 !important;
+}
+.measurement-row-panel div.rounded-full > button[class*="from-rose"] svg,
+.measurement-row-panel div.rounded-full > button[title*="None"][class*="bg-gradient"] svg,
+.measurement-row-panel div.rounded-full > button[title*="None"][aria-pressed="true"] svg,
+#measurement-rows .measurement-row-panel div.rounded-full > button[class*="from-rose"] svg,
+#measurement-rows .measurement-row-panel div.rounded-full > button[title*="None"][class*="bg-gradient"] svg,
+#measurement-rows .measurement-row-panel div.rounded-full > button[title*="None"][aria-pressed="true"] svg {
+  color: #fb7185 !important;
+  stroke: currentColor !important;
+}
+
+/* 2. Pick mode (sky) */
+.measurement-row-panel div.rounded-full > button[class*="from-sky"],
+.measurement-row-panel div.rounded-full > button[title*="Pick"][class*="bg-gradient"],
+.measurement-row-panel div.rounded-full > button[title*="Pick"][aria-pressed="true"],
+#measurement-rows .measurement-row-panel div.rounded-full > button[class*="from-sky"],
+#measurement-rows .measurement-row-panel div.rounded-full > button[title*="Pick"][class*="bg-gradient"],
+#measurement-rows .measurement-row-panel div.rounded-full > button[title*="Pick"][aria-pressed="true"] {
+  color: #38bdf8 !important;
+}
+.measurement-row-panel div.rounded-full > button[class*="from-sky"] svg,
+.measurement-row-panel div.rounded-full > button[title*="Pick"][class*="bg-gradient"] svg,
+.measurement-row-panel div.rounded-full > button[title*="Pick"][aria-pressed="true"] svg,
+#measurement-rows .measurement-row-panel div.rounded-full > button[class*="from-sky"] svg,
+#measurement-rows .measurement-row-panel div.rounded-full > button[title*="Pick"][class*="bg-gradient"] svg,
+#measurement-rows .measurement-row-panel div.rounded-full > button[title*="Pick"][aria-pressed="true"] svg {
+  color: #38bdf8 !important;
+  stroke: currentColor !important;
+}
+
+/* 3. Function / Divide mode (emerald) */
+.measurement-row-panel div.rounded-full > button[class*="from-emerald"],
+.measurement-row-panel div.rounded-full > button[title*="Function"][class*="bg-gradient"],
+.measurement-row-panel div.rounded-full > button[title*="Function"][aria-pressed="true"],
+#measurement-rows .measurement-row-panel div.rounded-full > button[class*="from-emerald"],
+#measurement-rows .measurement-row-panel div.rounded-full > button[title*="Function"][class*="bg-gradient"],
+#measurement-rows .measurement-row-panel div.rounded-full > button[title*="Function"][aria-pressed="true"] {
+  color: #34d399 !important;
+}
+.measurement-row-panel div.rounded-full > button[class*="from-emerald"] svg,
+.measurement-row-panel div.rounded-full > button[title*="Function"][class*="bg-gradient"] svg,
+.measurement-row-panel div.rounded-full > button[title*="Function"][aria-pressed="true"] svg,
+#measurement-rows .measurement-row-panel div.rounded-full > button[class*="from-emerald"] svg,
+#measurement-rows .measurement-row-panel div.rounded-full > button[title*="Function"][class*="bg-gradient"] svg,
+#measurement-rows .measurement-row-panel div.rounded-full > button[title*="Function"][aria-pressed="true"] svg {
+  color: #34d399 !important;
+  stroke: currentColor !important;
+}
+
+/* 4. Script / Expr mode (amber) */
+.measurement-row-panel div.rounded-full > button[class*="from-amber"],
+.measurement-row-panel div.rounded-full > button[title*="Script"][class*="bg-gradient"],
+.measurement-row-panel div.rounded-full > button[title*="Script"][aria-pressed="true"],
+#measurement-rows .measurement-row-panel div.rounded-full > button[class*="from-amber"],
+#measurement-rows .measurement-row-panel div.rounded-full > button[title*="Script"][class*="bg-gradient"],
+#measurement-rows .measurement-row-panel div.rounded-full > button[title*="Script"][aria-pressed="true"] {
+  color: #fbbf24 !important;
+}
+.measurement-row-panel div.rounded-full > button[class*="from-amber"] svg,
+.measurement-row-panel div.rounded-full > button[title*="Script"][class*="bg-gradient"] svg,
+.measurement-row-panel div.rounded-full > button[title*="Script"][aria-pressed="true"] svg,
+#measurement-rows .measurement-row-panel div.rounded-full > button[class*="from-amber"] svg,
+#measurement-rows .measurement-row-panel div.rounded-full > button[title*="Script"][class*="bg-gradient"] svg,
+#measurement-rows .measurement-row-panel div.rounded-full > button[title*="Script"][aria-pressed="true"] svg {
+  color: #fbbf24 !important;
+  stroke: currentColor !important;
+}
+
+/* 5. Parallel mode (indigo) */
+.measurement-row-panel div.rounded-full > button[class*="from-indigo"],
+.measurement-row-panel div.rounded-full > button[title*="Parallel"][class*="bg-gradient"],
+.measurement-row-panel div.rounded-full > button[title*="Parallel"][aria-pressed="true"],
+#measurement-rows .measurement-row-panel div.rounded-full > button[class*="from-indigo"],
+#measurement-rows .measurement-row-panel div.rounded-full > button[title*="Parallel"][class*="bg-gradient"],
+#measurement-rows .measurement-row-panel div.rounded-full > button[title*="Parallel"][aria-pressed="true"] {
+  color: #818cf8 !important;
+}
+.measurement-row-panel div.rounded-full > button[class*="from-indigo"] svg,
+.measurement-row-panel div.rounded-full > button[title*="Parallel"][class*="bg-gradient"] svg,
+.measurement-row-panel div.rounded-full > button[title*="Parallel"][aria-pressed="true"] svg,
+#measurement-rows .measurement-row-panel div.rounded-full > button[class*="from-indigo"] svg,
+#measurement-rows .measurement-row-panel div.rounded-full > button[title*="Parallel"][class*="bg-gradient"] svg,
+#measurement-rows .measurement-row-panel div.rounded-full > button[title*="Parallel"][aria-pressed="true"] svg {
+  color: #818cf8 !important;
+  stroke: currentColor !important;
+}
+
+/* General panel hamburger toggle button */
+.general-menu-toggle {
+  background: transparent !important;
+  box-shadow: none !important;
+}
+.general-menu-toggle[aria-expanded="true"] {
+  background: transparent !important;
+  color: #a5b4fc !important;
+  box-shadow: none !important;
+}
+
 

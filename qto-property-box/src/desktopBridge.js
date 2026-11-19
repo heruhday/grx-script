@@ -830,13 +830,11 @@ function startDesktop() {
     bar.querySelectorAll('button').forEach((b) => {
       const isOn = b.classList.contains('glass-pill-active') ||
                    b.title?.includes('(On)') ||
+                   b.classList.contains('bg-indigo-500/20') ||
                    (b.getAttribute('aria-pressed') === 'true');
-      const isOff = b.title?.includes('(Off)') ||
-                    (!b.classList.contains('glass-pill-active') && b.getAttribute('aria-pressed') === 'false');
-      if (isOn && !isOff) {
-        b.setAttribute('aria-pressed', 'true');
-      } else if (isOff) {
-        b.setAttribute('aria-pressed', 'false');
+      const targetVal = isOn ? 'true' : 'false';
+      if (b.getAttribute('aria-pressed') !== targetVal) {
+        b.setAttribute('aria-pressed', targetVal);
       }
     });
   };
@@ -844,6 +842,22 @@ function startDesktop() {
   if (catBar) {
     new MutationObserver(syncCategoryBarAria).observe(catBar, { childList: true, subtree: true, attributes: true, attributeFilter: ['class', 'title'] });
     syncCategoryBarAria();
+  }
+
+  const syncRowModesAria = () => {
+    const rowButtons = document.querySelectorAll('.measurement-row-panel div.rounded-full > button');
+    rowButtons.forEach((b) => {
+      const isActive = b.className.includes('bg-gradient');
+      const targetVal = isActive ? 'true' : 'false';
+      if (b.getAttribute('aria-pressed') !== targetVal) {
+        b.setAttribute('aria-pressed', targetVal);
+      }
+    });
+  };
+  const mRows = byId('measurement-rows') || document.body;
+  if (mRows) {
+    new MutationObserver(syncRowModesAria).observe(mRows, { childList: true, subtree: true, attributes: true, attributeFilter: ['class'] });
+    syncRowModesAria();
   }
 
   setInterval(pollSelection, 400);
