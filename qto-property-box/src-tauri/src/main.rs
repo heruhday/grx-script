@@ -96,8 +96,9 @@ fn cad_select_handles(handles: Vec<String>, zoom: bool, port: Option<u16>) -> Re
 #[derive(Debug, Deserialize, Serialize)]
 struct EntityXdataPatch {
     handle: String,
-    data: Value,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    data: Option<Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     properties: Option<Value>,
 }
 
@@ -112,8 +113,16 @@ fn cad_apply_qto_xdata(patches: Vec<EntityXdataPatch>, port: Option<u16>) -> Res
             const items = {}; \
             const updated = []; \
             for (const item of items) {{ \
-                entity.set({{ hand: item.handle, data: null }}); \
-                entity.set({{ ...(item.properties || {{}}), hand: item.handle, data: item.data }}); \
+                const patch = {{ hand: item.handle }}; \
+                if (item.properties && typeof item.properties === 'object') {{ \
+                    for (const [k, v] of Object.entries(item.properties)) {{ \
+                        if (v !== undefined) patch[k] = v; \
+                    }} \
+                }} \
+                if (item.data !== undefined) {{ \
+                    patch.data = item.data; \
+                }} \
+                entity.set(patch); \
                 updated.push(item.handle); \
             }} \
             return {{ ok: true, count: updated.length, handles: updated }}; \

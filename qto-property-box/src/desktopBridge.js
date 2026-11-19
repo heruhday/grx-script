@@ -416,9 +416,12 @@ function startDesktop() {
     } catch (error) { byId('general-status').textContent = String(error); }
   };
 
-  // General field direct edits applied to CAD
+  // General field direct edits applied to CAD (only touches the specified CAD property, never touches XData or other panels)
   async function applyGeneralFieldToCad(fieldName, val) {
-    if (!selection.entities.length) return;
+    if (!selection.entities || !selection.entities.length) {
+      await pollSelection();
+    }
+    if (!selection.entities || !selection.entities.length) return;
     const keyMap = { color: 'clr', layer: 'lyr', transparency: 'trp', visible: 'visible' };
     const propKey = keyMap[fieldName];
     if (!propKey) return;
@@ -432,20 +435,27 @@ function startDesktop() {
       else if (String(val).toLowerCase() === 'byblock') propVal = -1;
       else if (!isNaN(Number(val))) propVal = Number(val);
     } else if (propKey === 'visible') {
-      propVal = val === 'true';
+      propVal = val === 'true' || val === true;
+    } else if (propKey === 'lyr') {
+      propVal = String(val).trim() || '0';
     }
 
     const patches = selection.entities.map((ent) => ({
       handle: ent.hand || ent.handle,
-      data: ent.data || null,
       properties: { [propKey]: propVal },
     }));
 
     try {
       await invoke('cad_apply_qto_xdata', { patches, port: 8123 });
-      byId('general-status').textContent = `Applied ${fieldName} to ${patches.length} object(s)`;
+      const statusEl = byId('general-status');
+      if (statusEl) statusEl.textContent = `Applied ${fieldName} (${propVal}) to ${patches.length} object(s)`;
+      for (const ent of selection.entities) {
+        ent[propKey] = propVal;
+      }
+      await pollSelection();
     } catch (e) {
-      byId('general-status').textContent = `Apply error: ${e}`;
+      const statusEl = byId('general-status');
+      if (statusEl) statusEl.textContent = `Apply error: ${e}`;
     }
   }
 
@@ -458,9 +468,7 @@ function startDesktop() {
         applyGeneralFieldToCad(name, el.value);
       }
     });
-    if (name === 'visible') {
-      el.addEventListener('change', () => applyGeneralFieldToCad(name, el.value));
-    }
+    el.addEventListener('change', () => applyGeneralFieldToCad(name, el.value));
   });
 
   document.querySelectorAll('#general-panel button[data-action]').forEach((btn) => {
@@ -512,9 +520,12 @@ function startDesktop() {
     }, 30);
   }, true);
 
-  // Location field direct edits applied to CAD
+  // Location field direct edits applied to CAD (only touches that location key in data.props, never touches CAD properties or other panels)
   async function applyLocationFieldToCad(key, val) {
-    if (!selection.entities.length) return;
+    if (!selection.entities || !selection.entities.length) {
+      await pollSelection();
+    }
+    if (!selection.entities || !selection.entities.length) return;
     const patches = selection.entities.map((ent) => {
       const existingData = ent.data || {};
       const existingProps = existingData.props || {};
@@ -526,8 +537,7 @@ function startDesktop() {
             ...existingProps,
             [key]: val
           }
-        },
-        properties: {}
+        }
       };
     });
 
@@ -535,6 +545,11 @@ function startDesktop() {
       await invoke('cad_apply_qto_xdata', { patches, port: 8123 });
       const genStatus = byId('general-status');
       if (genStatus) genStatus.textContent = `Applied location ${key} to ${patches.length} object(s)`;
+      for (const ent of selection.entities) {
+        if (!ent.data) ent.data = {};
+        if (!ent.data.props) ent.data.props = {};
+        ent.data.props[key] = val;
+      }
       await pollSelection();
     } catch (e) {
       const genStatus = byId('general-status');
@@ -553,6 +568,88 @@ function startDesktop() {
     });
     el.addEventListener('change', () => {
       applyLocationFieldToCad(name, el.value);
+    });
+  });
+
+  // QTO item code/wbs/name direct edit applied to CAD (only touches item XData, does not touch general properties or location)
+  async function applyItemXdataToCad() {
+    if (!selection.entities || !selection.entities.length) {
+      await pollSelection();
+    }
+    if (!selection.entities || !selection.entities.length) return;
+
+    const activeInfo = ui.getActiveItem ? ui.getActiveItem() : null;
+    const cat = activeInfo?.cat;
+    const item = activeInfo?.item;
+    if (!item) return;
+
+    const typeKey = cat ? cat.id : 'length';
+    const totalQty = item.rows ? item.rows.reduce((sum, r) => sum + (Number(r.value) || 0), 0) : 0;
+
+    const patches = selection.entities.map((ent) => {
+      const existingData = ent.data || {};
+      const existingProps = existingData.props || {};
+      const nextProps = { ...existingProps };
+
+      if (item.code) {
+        const nextTypes = { ...(nextProps.types || {}) };
+        const entQty = Number(ent[typeKey === 'length' ? 'l' : (typeKey === 'area' || typeKey === 'wall' ? 'a' : (typeKey === 'solid' ? 'v' : 'l'))] || ent.l || ent.a || 0) || totalQty;
+
+        const record = {
+          code: item.code,
+          qty: entQty,
+          name: item.name || '',
+          unit: item.unit || '',
+          wbs: item.wbsCode || undefined
+        };
+
+        if (!nextTypes[typeKey]) nextTypes[typeKey] = [];
+        const existingIdx = nextTypes[typeKey].findIndex((r) => r.code === item.code);
+        if (existingIdx >= 0) nextTypes[typeKey][existingIdx] = record;
+        else nextTypes[typeKey].push(record);
+
+        nextProps.types = nextTypes;
+        nextProps.code = item.code;
+        nextProps.category = typeKey;
+        if (item.wbsCode) nextProps.wbs = item.wbsCode;
+      }
+
+      return {
+        handle: ent.hand || ent.handle,
+        data: {
+          ...existingData,
+          props: nextProps,
+          ...(item.code ? { code: item.code } : {})
+        }
+      };
+    });
+
+    try {
+      await invoke('cad_apply_qto_xdata', { patches, port: 8123 });
+      const itemCodeMsg = item.code ? ` (${item.code})` : '';
+      notify(`Applied QTO item${itemCodeMsg} to ${patches.length} CAD object(s)`);
+      for (const p of patches) {
+        const ent = selection.entities.find(e => (e.hand || e.handle) === p.handle);
+        if (ent) ent.data = p.data;
+      }
+      await pollSelection();
+      if (project) scheduleSave();
+    } catch (e) {
+      notify(`Apply error: ${e}`);
+    }
+  }
+
+  ['code', 'wbs-code', 'name'].forEach((suffix) => {
+    const el = byId('input-item-' + suffix);
+    if (!el) return;
+    el.addEventListener('change', async () => {
+      const activeInfo = ui.getActiveItem ? ui.getActiveItem() : null;
+      if (!activeInfo?.item) return;
+      if (suffix === 'code') activeInfo.item.code = el.value.trim() || activeInfo.item.code;
+      else if (suffix === 'wbs-code') activeInfo.item.wbsCode = el.value.trim();
+      else if (suffix === 'name') activeInfo.item.name = el.value.trim() || activeInfo.item.name;
+      await applyItemXdataToCad();
+      if (ui.render) ui.render();
     });
   });
 
@@ -655,7 +752,7 @@ function startDesktop() {
           props: nextProps,
           ...(item?.code ? { code: item.code } : {})
         },
-        properties: { ...properties }
+        properties: Object.keys(properties).length > 0 ? { ...properties } : undefined
       };
     });
 
@@ -693,17 +790,30 @@ function startDesktop() {
       if (codeInput || wbsInput || nameInput || locInput || genInput || rowInput) {
         e.preventDefault();
         e.stopPropagation();
-
-        const activeInfo = ui.getActiveItem ? ui.getActiveItem() : null;
-        if (activeInfo?.item) {
-          if (codeInput) activeInfo.item.code = codeInput.value.trim() || activeInfo.item.code;
-          if (wbsInput) activeInfo.item.wbsCode = wbsInput.value.trim();
-          if (nameInput) activeInfo.item.name = nameInput.value.trim() || activeInfo.item.name;
-        }
-
         e.target.blur();
-        await applyAllToCad();
-        if (ui.render) ui.render();
+
+        if (genInput) {
+          const fieldEl = genInput.closest('.general-field');
+          const fieldName = fieldEl?.dataset?.generalField || genInput.id.replace('general-', '');
+          if (fieldName) {
+            await applyGeneralFieldToCad(fieldName, genInput.value);
+          }
+        } else if (locInput) {
+          const fieldEl = locInput.closest('.location-field');
+          const key = locInput.id ? locInput.id.replace('location-', '') : fieldEl?.dataset?.locationField;
+          if (key) {
+            await applyLocationFieldToCad(key, locInput.value);
+          }
+        } else if (codeInput || wbsInput || nameInput || rowInput) {
+          const activeInfo = ui.getActiveItem ? ui.getActiveItem() : null;
+          if (activeInfo?.item) {
+            if (codeInput) activeInfo.item.code = codeInput.value.trim() || activeInfo.item.code;
+            if (wbsInput) activeInfo.item.wbsCode = wbsInput.value.trim();
+            if (nameInput) activeInfo.item.name = nameInput.value.trim() || activeInfo.item.name;
+          }
+          await applyItemXdataToCad();
+          if (ui.render) ui.render();
+        }
       }
     }
   }, true);

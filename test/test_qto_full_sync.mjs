@@ -40,7 +40,20 @@ const invoke = async (command, args) => {
     }
     case 'cad_apply_qto_xdata': {
       if (args.patches && args.patches.length) {
-        testPolyline.data = args.patches[0].data;
+        const patch = args.patches[0];
+        if (patch.data !== undefined && patch.data !== null) {
+          testPolyline.data = {
+            ...(testPolyline.data || {}),
+            ...patch.data,
+            props: {
+              ...((testPolyline.data && testPolyline.data.props) || {}),
+              ...((patch.data && patch.data.props) || {})
+            }
+          };
+        }
+        if (patch.properties && typeof patch.properties === 'object') {
+          Object.assign(testPolyline, patch.properties);
+        }
       }
       return { ok: true, count: args.patches.length };
     }
@@ -93,7 +106,7 @@ try {
   await new Promise((resolve) => setTimeout(resolve, 50));
   assert.ok(calls.some(c => c.command === 'cad_apply_qto_xdata'), 'Pressing F5 applied to CAD');
 
-  // 5. Test typing "CT01" and pressing Enter
+  // 5. Test typing "CT01" and pressing Enter -> ONLY updates item XData, does not touch general properties
   const codeInput = document.getElementById('input-item-code');
   assert.ok(codeInput, '#input-item-code exists');
   codeInput.value = 'CT01';
@@ -103,17 +116,76 @@ try {
   codeInput.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
   await new Promise((resolve) => setTimeout(resolve, 50));
 
-  const applyCall = calls.find(c => c.command === 'cad_apply_qto_xdata');
-  assert.ok(applyCall, 'Enter on #input-item-code triggered cad_apply_qto_xdata');
+  const applyCallCode = calls.find(c => c.command === 'cad_apply_qto_xdata');
+  assert.ok(applyCallCode, 'Enter on #input-item-code triggered cad_apply_qto_xdata');
   assert.equal(testPolyline.data.code, 'CT01', 'testPolyline.data.code updated to CT01');
   assert.equal(testPolyline.data.props.code, 'CT01', 'testPolyline.data.props.code updated to CT01');
+  assert.equal(applyCallCode.args.patches[0].properties, undefined, 'Item code update did NOT send properties');
+  assert.equal(testPolyline.clr, 256, 'Color is still 256 ByLayer');
+  assert.equal(testPolyline.lyr, '0', 'Layer is still 0');
 
-  // 6. Test US number input parsing
+  // 6. Test updating Color alone -> ONLY updates color, does NOT touch XData or layer
+  const colorInput = document.getElementById('general-color');
+  assert.ok(colorInput, '#general-color exists');
+  colorInput.value = '1';
+  colorInput.dispatchEvent(new window.Event('input', { bubbles: true }));
+
+  calls.length = 0;
+  colorInput.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+  await new Promise((resolve) => setTimeout(resolve, 50));
+
+  const applyCallColor = calls.find(c => c.command === 'cad_apply_qto_xdata');
+  assert.ok(applyCallColor, 'Enter on #general-color triggered cad_apply_qto_xdata');
+  assert.equal(applyCallColor.args.patches[0].properties?.clr, 1, 'Color patch sent clr = 1');
+  assert.equal(applyCallColor.args.patches[0].data, undefined, 'Color patch did NOT send or wipe data');
+  assert.equal(testPolyline.clr, 1, 'testPolyline.clr updated to 1');
+  assert.equal(testPolyline.data.code, 'CT01', 'testPolyline.data.code preserved as CT01');
+  assert.equal(testPolyline.data.props.code, 'CT01', 'testPolyline.data.props.code preserved as CT01');
+  assert.equal(testPolyline.lyr, '0', 'Layer is still 0');
+
+  // 7. Test updating Layer alone -> ONLY updates layer, does NOT touch color or XData
+  const layerInput = document.getElementById('general-layer');
+  assert.ok(layerInput, '#general-layer exists');
+  layerInput.value = 'Qs.Floor';
+  layerInput.dispatchEvent(new window.Event('input', { bubbles: true }));
+
+  calls.length = 0;
+  layerInput.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+  await new Promise((resolve) => setTimeout(resolve, 50));
+
+  const applyCallLayer = calls.find(c => c.command === 'cad_apply_qto_xdata');
+  assert.ok(applyCallLayer, 'Enter on #general-layer triggered cad_apply_qto_xdata');
+  assert.equal(applyCallLayer.args.patches[0].properties?.lyr, 'Qs.Floor', 'Layer patch sent lyr = Qs.Floor');
+  assert.equal(applyCallLayer.args.patches[0].data, undefined, 'Layer patch did NOT send or wipe data');
+  assert.equal(testPolyline.lyr, 'Qs.Floor', 'testPolyline.lyr updated to Qs.Floor');
+  assert.equal(testPolyline.clr, 1, 'testPolyline.clr preserved as 1');
+  assert.equal(testPolyline.data.code, 'CT01', 'testPolyline.data.code preserved as CT01');
+
+  // 8. Test updating Location building alone -> ONLY updates location building in props, does NOT touch color or layer
+  const buildingInput = document.getElementById('location-building');
+  assert.ok(buildingInput, '#location-building exists');
+  buildingInput.value = 'Tower A';
+  buildingInput.dispatchEvent(new window.Event('input', { bubbles: true }));
+
+  calls.length = 0;
+  buildingInput.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+  await new Promise((resolve) => setTimeout(resolve, 50));
+
+  const applyCallBuilding = calls.find(c => c.command === 'cad_apply_qto_xdata');
+  assert.ok(applyCallBuilding, 'Enter on #location-building triggered cad_apply_qto_xdata');
+  assert.equal(applyCallBuilding.args.patches[0].properties, undefined, 'Location patch did NOT send CAD properties');
+  assert.equal(applyCallBuilding.args.patches[0].data?.props?.building, 'Tower A', 'Location patch sent building = Tower A');
+  assert.equal(testPolyline.data.props.building, 'Tower A', 'testPolyline.data.props.building updated to Tower A');
+  assert.equal(testPolyline.data.code, 'CT01', 'testPolyline.data.code preserved as CT01');
+  assert.equal(testPolyline.clr, 1, 'testPolyline.clr preserved as 1');
+  assert.equal(testPolyline.lyr, 'Qs.Floor', 'testPolyline.lyr preserved as Qs.Floor');
+
+  // 9. Test US number input parsing
   assert.equal(window.parseUSNum('3,1'), 3.1, 'parseUSNum converts 3,1 to 3.1');
   assert.equal(window.parseUSNum('0,95'), 0.95, 'parseUSNum converts 0,95 to 0.95');
   assert.equal(window.parseUSNum('1,234.56'), 1234.56, 'parseUSNum parses 1,234.56 correctly');
 
-  console.log('ALL QTO FULL SYNC & ENTER TESTS PASSED!');
+  console.log('ALL GRANULAR EDIT, QTO FULL SYNC & ENTER TESTS PASSED!');
 } finally {
   window.close();
 }
