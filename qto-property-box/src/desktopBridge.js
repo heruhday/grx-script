@@ -711,7 +711,7 @@ function startDesktop() {
   window.qtoSaveProjectUI = () => save().then(() => notify('Project saved.'));
   for (const name of ['click', 'input', 'change', 'qto-wbs-change', 'qto-panel-visibility']) document.addEventListener(name, scheduleSave);
   document.addEventListener('toggle', scheduleSave, true);
-  window.addEventListener('scroll', scheduleSave, { passive: true });
+  window.addEventListener('scroll', scheduleSave, { passive: true, capture: true });
   document.addEventListener('visibilitychange', () => { if (document.hidden) save().catch(notify); });
 
   setInterval(pollSelection, 400);

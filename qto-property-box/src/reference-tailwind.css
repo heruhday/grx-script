@@ -1,3 +1,84 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* ==========================================================================
+   Header Fixed on Top, Content Vertically Scrollable, No Visible Scrollbars
+   ========================================================================== */
+
+html,
+body {
+  height: 100% !important;
+  height: 100vh !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  overflow: hidden !important;
+}
+
+#projects-screen {
+  height: 100% !important;
+  height: 100vh !important;
+  max-height: 100vh !important;
+  overflow-y: auto !important;
+  overflow-x: hidden !important;
+  -webkit-overflow-scrolling: touch;
+}
+
+#app-shell {
+  height: 100% !important;
+  height: 100vh !important;
+  max-height: 100vh !important;
+  min-height: 0 !important;
+  overflow: hidden !important;
+  display: flex !important;
+  flex-direction: column !important;
+}
+
+#workspace-project-bar {
+  flex-shrink: 0 !important;
+  position: static !important;
+  z-index: 40 !important;
+}
+
+#app-shell > header {
+  flex-shrink: 0 !important;
+  position: static !important;
+  top: auto !important;
+  z-index: 30 !important;
+}
+
+#app-shell > main {
+  flex: 1 1 0% !important;
+  min-height: 0 !important;
+  height: 0 !important;
+  overflow-y: auto !important;
+  overflow-x: hidden !important;
+  -webkit-overflow-scrolling: touch;
+}
+
+#shortcut-footer {
+  flex-shrink: 0 !important;
+}
+
+/* Hide all scrollbars across the application while preserving smooth scroll */
+*::-webkit-scrollbar,
+html::-webkit-scrollbar,
+body::-webkit-scrollbar,
+#app-shell::-webkit-scrollbar,
+main::-webkit-scrollbar,
+div::-webkit-scrollbar,
+section::-webkit-scrollbar {
+  display: none !important;
+  width: 0 !important;
+  height: 0 !important;
+  background: transparent !important;
+}
+
+*,
+html,
+body,
+#app-shell,
+main {
+  -ms-overflow-style: none !important;
+  scrollbar-width: none !important;
+}
