@@ -82,3 +82,136 @@ main {
   -ms-overflow-style: none !important;
   scrollbar-width: none !important;
 }
+
+/* ==========================================================================
+   Category Filter Bar & Icon Buttons: Pure Icon Color / Grey Only, No Background
+   ========================================================================== */
+
+#category-filter-bar button,
+#category-filter-bar button.glass-pill-active,
+#category-filter-bar button.glass-pill-btn,
+#category-filter-bar button.glass-sub,
+.report-category-icons button,
+.report-category-icons button.glass-pill-active,
+.report-category-icons button.glass-pill-btn,
+.report-category-icons button.glass-sub {
+  background: transparent !important;
+  background-image: none !important;
+  background-color: transparent !important;
+  border: none !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+  -webkit-box-shadow: none !important;
+  outline: none !important;
+  --tw-ring-shadow: 0 0 #0000 !important;
+  --tw-ring-color: transparent !important;
+  --tw-ring-offset-shadow: 0 0 #0000 !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  transition: color 0.15s ease, opacity 0.15s ease, transform 0.1s ease !important;
+}
+
+#category-filter-bar button:hover,
+#category-filter-bar button:focus,
+#category-filter-bar button:active,
+.report-category-icons button:hover,
+.report-category-icons button:focus,
+.report-category-icons button:active {
+  background: transparent !important;
+  background-image: none !important;
+  background-color: transparent !important;
+  border: none !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+  outline: none !important;
+  --tw-ring-shadow: 0 0 #0000 !important;
+  --tw-ring-color: transparent !important;
+}
+
+/* Inactive / OFF state: Grey Only */
+#category-filter-bar button[aria-pressed="false"],
+#category-filter-bar button[title*="(Off)"],
+#category-filter-bar button.opacity-35,
+#category-filter-bar button.grayscale,
+#category-filter-bar button:not(.glass-pill-active):not([aria-pressed="true"]):not([title*="(On)"]),
+.report-category-icons button[aria-pressed="false"],
+.report-category-icons button[title*="(Off)"],
+.report-category-icons button:not(.glass-pill-active):not([aria-pressed="true"]):not([title*="(On)"]) {
+  color: #64748b !important;
+  opacity: 0.45 !important;
+  filter: grayscale(100%) !important;
+}
+
+#category-filter-bar button[aria-pressed="false"] svg,
+#category-filter-bar button[title*="(Off)"] svg,
+#category-filter-bar button.opacity-35 svg,
+#category-filter-bar button.grayscale svg,
+#category-filter-bar button:not(.glass-pill-active):not([aria-pressed="true"]):not([title*="(On)"]) svg,
+.report-category-icons button[aria-pressed="false"] svg,
+.report-category-icons button[title*="(Off)"] svg,
+.report-category-icons button:not(.glass-pill-active):not([aria-pressed="true"]):not([title*="(On)"]) svg {
+  color: #64748b !important;
+  stroke: currentColor !important;
+}
+
+/* Hover on Inactive */
+#category-filter-bar button[aria-pressed="false"]:hover,
+#category-filter-bar button[title*="(Off)"]:hover,
+#category-filter-bar button:not(.glass-pill-active):not([aria-pressed="true"]):not([title*="(On)"]):hover,
+.report-category-icons button[aria-pressed="false"]:hover,
+.report-category-icons button[title*="(Off)"]:hover,
+.report-category-icons button:not(.glass-pill-active):not([aria-pressed="true"]):not([title*="(On)"]):hover {
+  opacity: 0.75 !important;
+  filter: grayscale(40%) !important;
+}
+
+/* Active / ON state: Pure Icon Color (No Background, Full Opacity, No Grayscale) */
+#category-filter-bar button[aria-pressed="true"],
+#category-filter-bar button[title*="(On)"],
+#category-filter-bar button.glass-pill-active,
+.report-category-icons button[aria-pressed="true"],
+.report-category-icons button[title*="(On)"],
+.report-category-icons button.glass-pill-active {
+  opacity: 1 !important;
+  filter: none !important;
+}
+
+#category-filter-bar button[aria-pressed="true"]:hover,
+#category-filter-bar button[title*="(On)"]:hover,
+#category-filter-bar button.glass-pill-active:hover,
+.report-category-icons button[aria-pressed="true"]:hover,
+.report-category-icons button[title*="(On)"]:hover,
+.report-category-icons button.glass-pill-active:hover {
+  filter: brightness(1.25) !important;
+}
+
+/* Active specific icon colors */
+#category-filter-bar > button:first-child[aria-pressed="true"],
+#category-filter-bar > button:first-child.glass-pill-active {
+  color: #f8fafc !important;
+}
+#category-filter-bar > #btn-category-drawings[aria-pressed="true"],
+#category-filter-bar > #btn-category-drawings.glass-pill-active {
+  color: #f8fafc !important;
+}
+#category-filter-bar > #btn-category-general[aria-pressed="true"],
+#category-filter-bar > #btn-category-general.glass-pill-active {
+  color: #a78bfa !important;
+}
+#category-filter-bar > #btn-category-wbs[aria-pressed="true"],
+#category-filter-bar > #btn-category-wbs.glass-pill-active {
+  color: #818cf8 !important;
+}
+#category-filter-bar > #btn-category-location[aria-pressed="true"],
+#category-filter-bar > #btn-category-location.glass-pill-active {
+  color: #38bdf8 !important;
+}
+#category-filter-bar > #btn-category-preview[aria-pressed="true"],
+#category-filter-bar > #btn-category-preview.glass-pill-active {
+  color: #a78bfa !important;
+}
+#category-filter-bar > #btn-category-selected-report[aria-pressed="true"],
+#category-filter-bar > #btn-category-selected-report.glass-pill-active {
+  color: #f8fafc !important;
+}
+

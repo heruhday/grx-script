@@ -824,6 +824,28 @@ function startDesktop() {
   window.addEventListener('scroll', scheduleSave, { passive: true, capture: true });
   document.addEventListener('visibilitychange', () => { if (document.hidden) save().catch(notify); });
 
+  const syncCategoryBarAria = () => {
+    const bar = byId('category-filter-bar');
+    if (!bar) return;
+    bar.querySelectorAll('button').forEach((b) => {
+      const isOn = b.classList.contains('glass-pill-active') ||
+                   b.title?.includes('(On)') ||
+                   (b.getAttribute('aria-pressed') === 'true');
+      const isOff = b.title?.includes('(Off)') ||
+                    (!b.classList.contains('glass-pill-active') && b.getAttribute('aria-pressed') === 'false');
+      if (isOn && !isOff) {
+        b.setAttribute('aria-pressed', 'true');
+      } else if (isOff) {
+        b.setAttribute('aria-pressed', 'false');
+      }
+    });
+  };
+  const catBar = byId('category-filter-bar');
+  if (catBar) {
+    new MutationObserver(syncCategoryBarAria).observe(catBar, { childList: true, subtree: true, attributes: true, attributeFilter: ['class', 'title'] });
+    syncCategoryBarAria();
+  }
+
   setInterval(pollSelection, 400);
   pollSelection();
   refreshProjects().catch((error) => { byId('projects-status').textContent = String(error); });
