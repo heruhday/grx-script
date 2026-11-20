@@ -48,12 +48,13 @@ body {
 }
 
 #app-shell > main {
-  flex: 1 1 0% !important;
+  flex: 1 1 auto !important;
   min-height: 0 !important;
-  height: 0 !important;
   overflow-y: auto !important;
   overflow-x: hidden !important;
   -webkit-overflow-scrolling: touch;
+  scrollbar-width: none !important;
+  -ms-overflow-style: none !important;
 }
 
 #shortcut-footer {

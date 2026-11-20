@@ -81,6 +81,7 @@ try {
   window.isTauri = () => true;
   window.eval(bridge);
 
+  document.body.classList.remove('projects-home');
   await new Promise((resolve) => setTimeout(resolve, 60));
 
   // 1. Verify live CAD selection was synced to active item
@@ -123,6 +124,20 @@ try {
   assert.equal(applyCallCode.args.patches[0].properties, undefined, 'Item code update did NOT send properties');
   assert.equal(testPolyline.clr, 256, 'Color is still 256 ByLayer');
   assert.equal(testPolyline.lyr, '0', 'Layer is still 0');
+
+  // 5b. Verify that active category remains expanded and detail remains visible
+  const activeInfoAfterEnter = window.qtoUIState.getActiveItem();
+  assert.equal(activeInfoAfterEnter.cat.expanded, true, 'Active category remains expanded after Enter');
+  assert.equal(window.qtoUIState.state.detailExpanded, true, 'Detail panel remains expanded after Enter');
+  assert.ok(window.qtoUIState.state.visibleCategoryIds.includes(activeInfoAfterEnter.cat.id), 'Category remains visible');
+
+  // 5c. Test focus preservation: when codeInput is focused, syncCadSelection does NOT destroy the DOM
+  const codeInputRef = document.getElementById('input-item-code');
+  codeInputRef.focus();
+  assert.equal(document.activeElement, codeInputRef, 'codeInput has focus');
+  window.qtoUIState.syncCadSelection([testPolyline]);
+  assert.equal(document.getElementById('input-item-code'), codeInputRef, 'codeInput DOM element was NOT destroyed while focused');
+  assert.equal(document.activeElement, codeInputRef, 'Focus was preserved on codeInput during CAD selection sync');
 
   // 6. Test updating Color alone -> ONLY updates color, does NOT touch XData or layer
   const colorInput = document.getElementById('general-color');

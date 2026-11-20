@@ -508,6 +508,10 @@ function startDesktop() {
       return;
     }
 
+    if (e.target.closest('input, textarea, select, [contenteditable="true"]')) {
+      return;
+    }
+
     setTimeout(() => {
       const activeInfo = ui.getActiveItem ? ui.getActiveItem() : null;
       if (activeInfo?.item && selection.entities && selection.entities.length > 0) {
@@ -639,18 +643,33 @@ function startDesktop() {
     }
   }
 
-  ['code', 'wbs-code', 'name'].forEach((suffix) => {
-    const el = byId('input-item-' + suffix);
-    if (!el) return;
-    el.addEventListener('change', async () => {
-      const activeInfo = ui.getActiveItem ? ui.getActiveItem() : null;
-      if (!activeInfo?.item) return;
-      if (suffix === 'code') activeInfo.item.code = el.value.trim() || activeInfo.item.code;
-      else if (suffix === 'wbs-code') activeInfo.item.wbsCode = el.value.trim();
-      else if (suffix === 'name') activeInfo.item.name = el.value.trim() || activeInfo.item.name;
-      await applyItemXdataToCad();
-      if (ui.render) ui.render();
-    });
+  document.addEventListener('change', async (e) => {
+    const codeEl = e.target.closest('#input-item-code');
+    const wbsEl = e.target.closest('#input-item-wbs-code');
+    const nameEl = e.target.closest('#input-item-name');
+    if (!codeEl && !wbsEl && !nameEl) return;
+
+    const activeInfo = ui.getActiveItem ? ui.getActiveItem() : null;
+    if (!activeInfo?.item) return;
+    if (codeEl) activeInfo.item.code = codeEl.value.trim() || activeInfo.item.code;
+    else if (wbsEl) activeInfo.item.wbsCode = wbsEl.value.trim();
+    else if (nameEl) activeInfo.item.name = nameEl.value.trim() || activeInfo.item.name;
+
+    if (activeInfo.cat) {
+      activeInfo.cat.expanded = true;
+      if (ui.state) {
+        if (!ui.state.visibleCategoryIds.includes(activeInfo.cat.id)) {
+          ui.state.visibleCategoryIds.push(activeInfo.cat.id);
+        }
+        ui.state.activeCategoryId = activeInfo.cat.id;
+        ui.state.activeItemId = activeInfo.item.id;
+        ui.state.detailExpanded = true;
+      }
+    }
+
+    await applyItemXdataToCad();
+    const isEditing = document.activeElement && document.activeElement.matches('input, textarea, select, [contenteditable="true"]');
+    if (!isEditing && ui.render) ui.render();
   });
 
   // Apply all current UI properties (Item QTO + Location + General) to selected CAD objects
@@ -811,6 +830,19 @@ function startDesktop() {
             if (wbsInput) activeInfo.item.wbsCode = wbsInput.value.trim();
             if (nameInput) activeInfo.item.name = nameInput.value.trim() || activeInfo.item.name;
           }
+          if (activeInfo?.cat) {
+            activeInfo.cat.expanded = true;
+            if (ui.state) {
+              if (!ui.state.visibleCategoryIds.includes(activeInfo.cat.id)) {
+                ui.state.visibleCategoryIds.push(activeInfo.cat.id);
+              }
+              ui.state.activeCategoryId = activeInfo.cat.id;
+              if (activeInfo.item) {
+                ui.state.activeItemId = activeInfo.item.id;
+              }
+              ui.state.detailExpanded = true;
+            }
+          }
           await applyItemXdataToCad();
           if (ui.render) ui.render();
         }
@@ -828,10 +860,22 @@ function startDesktop() {
     const bar = byId('category-filter-bar');
     if (!bar) return;
     bar.querySelectorAll('button').forEach((b) => {
-      const isOn = b.classList.contains('glass-pill-active') ||
-                   b.title?.includes('(On)') ||
-                   b.classList.contains('bg-indigo-500/20') ||
-                   (b.getAttribute('aria-pressed') === 'true');
+      let isOn = false;
+      if (b.id === 'btn-category-general') {
+        isOn = document.getElementById('general-panel')?.hidden === false;
+      } else if (b.id === 'btn-category-location') {
+        isOn = document.getElementById('location-panel')?.hidden === false;
+      } else if (b.id === 'btn-category-drawings') {
+        isOn = document.getElementById('drawing-manager-panel')?.hidden === false;
+      } else if (b.id === 'btn-category-preview') {
+        isOn = document.getElementById('cad-simulator-panel')?.hidden === false;
+      } else if (b.title?.includes('(On)')) {
+        isOn = true;
+      } else if (b.title?.includes('(Off)')) {
+        isOn = false;
+      } else {
+        isOn = b.classList.contains('glass-pill-active') || b.classList.contains('bg-indigo-500/20');
+      }
       const targetVal = isOn ? 'true' : 'false';
       if (b.getAttribute('aria-pressed') !== targetVal) {
         b.setAttribute('aria-pressed', targetVal);

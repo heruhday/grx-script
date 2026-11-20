@@ -4109,6 +4109,7 @@ body:not(.theme-dark) #sort-level-dialog .sort-card:not(.selected) { background:
       });
 
       window.qtoUIState = {
+        state,
         exportData: () => JSON.parse(JSON.stringify({categories:state.categories,customFunctions,evalScripts})),
         importData: data => {
           if(!data || !Array.isArray(data.categories)) throw Error('Invalid measurement data');
@@ -4212,16 +4213,16 @@ body:not(.theme-dark) #sort-level-dialog .sort-card:not(.selected) { background:
             pickRow.entity = entities[0];
           }
 
-          const isFocusedInput = document.activeElement && ['input-item-code', 'input-item-wbs-code', 'input-item-name'].includes(document.activeElement.id);
+          const isFocusedInput = document.activeElement && document.activeElement.matches('input, textarea, select, [contenteditable="true"]');
           if (isFocusedInput) {
             const totEl = document.getElementById('detail-item-total');
             if (totEl) totEl.textContent = fmtNum(itemTotal(item)) + ' ' + item.unit;
             const rowValInp = document.querySelector('.measurement-row-panel .row-val-input');
             if (rowValInp && !rowValInp.matches(':focus')) rowValInp.value = fmtNum(pickRow.value);
-            renderCategories();
-          } else {
-            render();
+            refreshCategoryTotals();
+            return;
           }
+          render();
         },
         acceptCadSelection: entities => {
           const res = getActiveItem();
